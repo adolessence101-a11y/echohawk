@@ -1,6 +1,6 @@
 // HTTP API, SSE stream, Retell webhook with signature verification, and static UIs. No framework: node:http.
 import { createServer } from "node:http";
-import { readFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { fileURLToPath } from "node:url";
@@ -12,6 +12,7 @@ import { catalog, getKit, showKitCard } from "./kits.js";
 import { scanTurn } from "./triggers.js";
 import { encodeFrame, toBase64, TARGET_CODES, ACTION_CODES, LANG_CODES } from "../device/frame.js";
 import { parseSameHeader, actionForEvent } from "./same_decoder.js";
+import { runReplay, availableDays } from "./replay.js";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const MIME = { ".html": "text/html; charset=utf-8", ".js": "text/javascript", ".css": "text/css", ".json": "application/json", ".csv": "text/csv", ".png": "image/png", ".svg": "image/svg+xml", ".webmanifest": "application/manifest+json" };
@@ -134,8 +135,16 @@ export function createHttpServer({ store, engine, hub }) {
       if (path === "/twists" && method === "POST") { const body = JSON.parse((await readBody(req)).toString() || "{}"); const row = { id: store.nextId("tw"), received_at: new Date().toISOString(), ...body }; store.twists.push(row); store.save(); return json(res, 201, row); }
       if (path === "/cost/meter" && method === "GET") { const minutes = store.calls.reduce((a, c) => a + ((new Date(c.ended_at || Date.now()) - new Date(c.started_at)) / 60000), 0); return json(res, 200, { ts: new Date().toISOString(), calls_active: hub.sessions.size, paid_concurrency: config.paidConcurrency, retell_cents_today: Math.round(minutes * 11), dispatcher_minutes_saved_est: Math.round(store.calls.filter((c) => c.status === "ended").length * 3), stream: hub.mode(), basis: "Retell ~ $0.11/min example rate; minutes saved assumes 3 per fully automated call (team judgment)" }); }
 
+      // ---- map polygons (LAPD reporting districts), cached on disk after the first browser load ----
+      if (path === "/geo/rd" && method === "GET") { if (!existsSync(join(root, "data/rd_polygons.geojson"))) return json(res, 404, { error: "not cached yet" }); const data = await readFile(join(root, "data/rd_polygons.geojson")); res.writeHead(200, { "content-type": "application/json" }); return res.end(data); }
+      if (path === "/geo/rd" && method === "POST") { const raw = (await readBody(req)).toString(); let gj; try { gj = JSON.parse(raw); } catch { return json(res, 400, { error: "bad json" }); } if (gj.type !== "FeatureCollection" || !Array.isArray(gj.features) || !gj.features.length || !("REPDIST" in (gj.features[0].properties || {}))) return json(res, 400, { error: "not an LAPD reporting district FeatureCollection" }); await writeFile(join(root, "data/rd_polygons.geojson"), JSON.stringify(gj)); return json(res, 201, { ok: true, features: gj.features.length }); }
+
+      // ---- replay of a real LAPD day through the engine ----
+      if (path === "/replay/days" && method === "GET") return json(res, 200, availableDays());
+      if (path === "/replay/run" && method === "GET") { const out = runReplay(url.searchParams.get("date") || "2025-01-07", { fromHour: Number(url.searchParams.get("from") ?? 0), toHour: Number(url.searchParams.get("to") ?? 24) }); return json(res, out.error ? 404 : 200, out); }
+
       // ---- static UIs ----
-      const map = { "/": "/board/index.html", "/board": "/board/index.html", "/console": "/console/index.html", "/app": "/app/index.html", "/chirp": "/device/chirp_send.html" };
+      const map = { "/": "/board/index.html", "/board": "/board/index.html", "/console": "/console/index.html", "/app": "/app/index.html", "/chirp": "/device/chirp_send.html", "/replay": "/replay/index.html" };
       let file = map[path] || path;
       const full = join(root, file);
       if (full.startsWith(root) && existsSync(full) && !full.includes("node_modules") && !full.endsWith(".env")) { const data = await readFile(full); res.writeHead(200, { "content-type": MIME[extname(full)] || "application/octet-stream" }); return res.end(data); }

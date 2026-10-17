@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { config } from "./config.js";
 
 export const SOURCES = ["voice", "app", "ehawk", "telemetry", "field_unit"];
-export const TARGETS = ["power", "water", "gas", "power_line", "structure_fire", "wildfire", "road", "flood", "person", "vehicle", "unknown"];
+export const TARGETS = ["power", "water", "gas", "power_line", "structure_fire", "wildfire", "road", "flood", "person", "vehicle", "alarm", "crime", "unknown"];
 export const ACTIONS = ["dispatch_ems", "dispatch_fire", "dispatch_police", "welfare_check", "info_only", "deflect_311", "unknown"];
 export const CONTENT_STATUS = ["extracted", "partial", "none"];
 export const PROVENANCE = ["firsthand", "forwarded", "repeat_beacon", "simulated"];

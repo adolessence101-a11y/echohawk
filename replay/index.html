@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>EchoHawk Replay</title>
+<link rel="stylesheet" href="/vendor/leaflet/leaflet.css">
+<script src="/vendor/leaflet/leaflet.js"></script>
+<script src="/board/map.js"></script>
+<style>
+  :root { --bg:#0f1115; --panel:#171a21; --line:#262b36; --text:#e8eaf0; --muted:#8b93a7; --hand:#ff5d5d; --ask:#ffb020; --watch:#5aa0ff; --ok:#3ddc97; }
+  * { box-sizing:border-box } body { margin:0; background:var(--bg); color:var(--text); font:14px/1.45 system-ui,-apple-system,Segoe UI,Roboto,sans-serif }
+  header { display:flex; flex-wrap:wrap; align-items:center; gap:12px; padding:12px 18px; border-bottom:1px solid var(--line) }
+  h1 { font-size:16px; margin:0 } .muted { color:var(--muted); font-size:12px }
+  select, button, input { background:#232838; color:var(--text); border:1px solid var(--line); border-radius:6px; padding:6px 10px; font:inherit }
+  button.play { border-color:var(--ok); color:var(--ok); min-width:80px }
+  .clock { font-variant-numeric:tabular-nums; font-size:22px; font-weight:600; min-width:96px }
+  input[type=range] { flex:1; min-width:200px; padding:0 }
+  .stats { display:grid; grid-template-columns:repeat(4,1fr); gap:10px; padding:12px 18px }
+  .stat { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:10px 12px } .stat b { display:block; font-size:24px; font-variant-numeric:tabular-nums } .stat span { color:var(--muted); font-size:12px }
+  .stat.left b { color:#c9cede } .stat.right b { color:var(--ok) }
+  main { display:grid; grid-template-columns: 330px 1fr 360px; gap:12px; padding:0 18px 18px; height: calc(100vh - 190px); min-height:520px }
+  section { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:12px; overflow:auto; display:flex; flex-direction:column }
+  h2 { margin:0 0 8px; font-size:12px; text-transform:uppercase; letter-spacing:.8px; color:var(--muted) }
+  .ticket { border-bottom:1px solid var(--line); padding:5px 0; font-size:12px; display:grid; grid-template-columns:58px 44px 1fr; gap:6px } .ticket.new { animation: fl 1.2s ease-out } @keyframes fl { from { background:#2a3245 } to { background:transparent } }
+  .ticket .t { color:var(--muted); font-variant-numeric:tabular-nums } .ticket .rd { color:var(--watch) }
+  #map { flex:1; border-radius:8px; min-height:300px }
+  .line { border:1px solid var(--line); border-radius:8px; padding:8px; margin-bottom:8px } .line .top { display:flex; gap:8px; align-items:center }
+  .rung { display:inline-block; padding:1px 8px; border-radius:999px; font-weight:600; font-size:11px; color:#0f1115 } .rung.hand{background:var(--hand)} .rung.ask{background:var(--ask)} .rung.watch{background:var(--watch)}
+  .tag { font-size:11px; border:1px solid var(--line); border-radius:999px; padding:0 7px; color:var(--muted) } .tag.flag { border-color:var(--watch); color:var(--watch) } .tag.machine { border-color:#8b6cff; color:#b9a7ff }
+  .why { color:var(--muted); font-size:12px; margin-top:4px }
+  footer { padding:0 18px 14px } .note { color:var(--muted); font-size:12px }
+  @media (max-width: 1100px) { main { grid-template-columns:1fr; height:auto } .stats { grid-template-columns:repeat(2,1fr) } }
+</style>
+</head>
+<body>
+<header>
+  <h1>EchoHawk Replay · a real LA night, as it happened vs. with EchoHawk</h1>
+  <select id="day"></select>
+  <select id="window"><option value="15-24">3 PM to midnight</option><option value="18-22">6 PM to 10 PM</option><option value="0-24">Full day</option></select>
+  <button class="play" id="play">▶ Play</button>
+  <select id="speed"><option value="120">2 min per second</option><option value="300" selected>5 min per second</option><option value="900">15 min per second</option></select>
+  <div class="clock" id="clock">--:--</div>
+  <input type="range" id="scrub" min="0" max="0" value="0">
+</header>
+<div class="stats">
+  <div class="stat left"><b id="sCalls">0</b><span>calls so far = separate tickets a dispatcher read, one at a time (as it happened)</span></div>
+  <div class="stat right"><b id="sLines">0</b><span>EchoHawk lines on the supervisor board (same calls, grouped by district and kind)</span></div>
+  <div class="stat right"><b id="sMachine">0</b><span>alarm activations labeled machine, never counted as people calling</span></div>
+  <div class="stat right"><b id="sFlags">0</b><span>districts flagged against their own LAPD baseline</span></div>
+</div>
+<main>
+  <section><h2>As it happened · dispatch queue, arrival order</h2><div id="queue"></div></section>
+  <section><h2>Map · LAPD reporting districts <span class="muted" id="mapstatus"></span></h2><div id="map"></div></section>
+  <section><h2>With EchoHawk · what the supervisor sees</h2><div id="lines"></div></section>
+</main>
+<footer><div class="note" id="source"></div></footer>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (m) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[m]));
+const secs = (t) => { const [h, m, s] = t.split(":").map(Number); return h * 3600 + m * 60 + (s || 0); };
+const hhmm = (x) => `${String(Math.floor(x / 3600) % 24).padStart(2, "0")}:${String(Math.floor(x / 60) % 60).padStart(2, "0")}`;
+let DATA = null, MAP = null, clock = 0, start = 0, end = 0, playing = false, idx = 0, last = 0;
+
+async function load() {
+  const [from, to] = $("window").value.split("-").map(Number);
+  $("source").textContent = "Loading…";
+  DATA = await fetch(`/replay/run?date=${$("day").value}&from=${from}&to=${to}`).then((r) => r.json());
+  if (DATA.error) { $("source").textContent = DATA.error; return; }
+  start = DATA.frames.length ? secs(DATA.frames[0].t) - 60 : from * 3600; end = DATA.frames.length ? secs(DATA.frames.at(-1).t) + 60 : to * 3600;
+  $("scrub").min = start; $("scrub").max = end; seek(start);
+  $("source").textContent = `Source: ${DATA.source}. ${DATA.totals.calls} calls in this window. What this data can show: arrival order, how many separate tickets dispatch handled, and when EchoHawk would have grouped and flagged them. It has no response times or outcomes, so this page makes no claim about them. Call types are mapped to EchoHawk categories by radio-code family (team mapping); 906 alarm ringers are machine sources.`;
+}
+
+function seek(t) {
+  clock = Math.max(start, Math.min(end, t)); $("scrub").value = clock; $("clock").textContent = hhmm(clock);
+  const shown = DATA.frames.filter((f) => secs(f.t) <= clock);
+  const fresh = shown.length - idx; idx = shown.length;
+  // left: the queue, newest on top
+  $("queue").innerHTML = shown.slice(-120).reverse().map((f, i) => `<div class="ticket ${i < fresh && fresh < 20 ? "new" : ""}"><span class="t">${f.t}</span><span class="rd">${esc(f.rd)}</span><span>${esc(f.type)}</span></div>`).join("") || `<div class="muted">No calls yet.</div>`;
+  // right: EchoHawk lines built from the same frames
+  const byInc = {};
+  const solo = shown.filter((f) => f.passthrough).length;
+  for (const f of shown) if (f.incident && !f.passthrough) { const l = (byInc[f.incident] ||= { rd: f.rd, area: f.area, target: f.target, n: 0, machine: 0, rung: "watch", first: f.t, last: f.t, flagged: false, flagAt: null, reason: "" }); l.n++; if (f.machine) l.machine++; l.rung = f.rung; l.last = f.t; l.reason = f.reason; }
+  const flags = shown.filter((f) => f.flagged).map((f) => ({ rd: f.rd, t: f.t, incident: f.incident }));
+  for (const fl of flags) { const l = byInc[fl.incident]; if (l && !l.flagAt) { l.flagged = true; l.flagAt = fl.t; } }
+  const order = { hand: 0, ask: 1, watch: 2 };
+  const lines = Object.values(byInc).sort((a, b) => (b.flagged - a.flagged) || (order[a.rung] - order[b.rung]) || (b.n - a.n) || b.last.localeCompare(a.last));
+  $("lines").innerHTML = `<div class="muted" style="margin-bottom:8px">${solo} individual crime calls passed straight to dispatch, unchanged (not area events). Below: everything EchoHawk grouped or watched.</div>` + lines.slice(0, 40).map((l) => `<div class="line"><div class="top"><span class="rung ${l.rung}">${l.rung}</span><b>RD ${esc(l.rd)}</b><span class="muted">${esc(l.area)}</span>${l.flagged ? `<span class="tag flag">flagged ${l.flagAt.slice(0, 5)}</span>` : ""}${l.machine ? `<span class="tag machine">${l.machine} machine</span>` : ""}</div><div>${l.n} call${l.n > 1 ? "s" : ""} → 1 line · ${esc(l.target)}</div><div class="why">${l.machine === l.n && l.n > 2 ? "Alarm activations only: likely a power or wind event, not separate break-ins." : esc(l.reason)} · ${l.first.slice(0, 5)}–${l.last.slice(0, 5)}</div></div>`).join("") || `<div class="muted">Nothing yet.</div>`;
+  $("sCalls").textContent = shown.length; $("sLines").textContent = lines.length + solo; $("sMachine").textContent = shown.filter((f) => f.machine).length; $("sFlags").textContent = new Set(flags.map((f) => f.rd)).size;
+  // map: districts active in the last 60 minutes
+  if (MAP) {
+    MAP.reset(); const recent = {};
+    for (const f of shown) if (clock - secs(f.t) <= 3600) (recent[f.rd] ||= { n: 0, rung: "watch", machine: 0 }), recent[f.rd].n++, (recent[f.rd].rung = f.rung === "hand" || recent[f.rd].rung === "hand" ? "hand" : f.rung === "ask" || recent[f.rd].rung === "ask" ? "ask" : "watch"), f.machine && recent[f.rd].machine++;
+    const flagged = new Set(flags.filter((f) => clock - secs(f.t) <= 3600).map((f) => f.rd));
+    for (const [rd, r] of Object.entries(recent)) MAP.paint(rd, { rung: r.rung, flagged: flagged.has(rd), intensity: 0.15 + Math.min(0.6, r.n * 0.07), label: `RD ${rd} · ${r.n} call(s) in the last hour${r.machine ? ` (${r.machine} alarm)` : ""}${flagged.has(rd) ? " · FLAGGED vs baseline" : ""}` });
+  }
+}
+
+function tick(ts) {
+  if (!playing) return;
+  const dt = last ? (ts - last) / 1000 : 0; last = ts;
+  seek(clock + dt * Number($("speed").value));
+  if (clock >= end) { playing = false; $("play").textContent = "▶ Play"; return; }
+  requestAnimationFrame(tick);
+}
+$("play").onclick = () => { playing = !playing; $("play").textContent = playing ? "❚❚ Pause" : "▶ Play"; last = 0; if (playing) { if (clock >= end) { idx = 0; seek(start); } requestAnimationFrame(tick); } };
+$("scrub").oninput = (e) => { idx = 0; seek(Number(e.target.value)); };
+$("day").onchange = $("window").onchange = () => { playing = false; $("play").textContent = "▶ Play"; idx = 0; load(); };
+
+(async () => {
+  const days = await fetch("/replay/days").then((r) => r.json());
+  $("day").innerHTML = days.map((d) => `<option ${d === "2025-01-07" ? "selected" : ""}>${d}</option>`).join("");
+  EH_MAP.create($("map"), { status: $("mapstatus") }).then((m) => { MAP = m; MAP.focus(["0802", "0823", "0803"]); if (DATA) seek(clock); });
+  await load();
+})();
+</script>
+</body>
+</html>
