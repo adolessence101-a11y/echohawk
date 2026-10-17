@@ -17,7 +17,7 @@ Spec: `docs/BUILD_SPEC.md`. Build plan, acceptance tests and lanes: `docs/IMPLEM
 ```bash
 npm install            # server dependency (ws); retell-sdk is optional and only needed for provisioning
 cp .env.example .env   # RETELL_API_KEY for provisioning, ANTHROPIC_API_KEY for Claude; the demo runs with no keys
-npm test               # 96 tests, about two seconds
+npm test               # 97 tests, about two seconds
 npm start              # http://localhost:8787
 npm run build:web      # only after changing web/src: rebuilds the React screens into web/dist (a built copy is committed)
 ```
@@ -35,6 +35,9 @@ The React screens live in `web/` (Vite + React + TypeScript). The previous singl
 `/legacy/console`, `/legacy/replay` and `/app/legacy`.
 
 ## Demo run of show
+
+Start clean: **↺ Reset demo** on the board (click twice). It clears calls, reports, incidents, units, alerts and the event log, keeps baselines, kits and the twist log, and every open screen reloads.
+
 
 1. Board: **Run demo surge**. Water reports in three neighboring districts become one spreading line; five alarms in one
    district stay "alarms only"; two medical calls go straight to "needs a person". Alerts drop in top right.

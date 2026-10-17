@@ -112,3 +112,22 @@ test("an app report of a fire keeps the severity the resident gave", () => {
   triageSelfReport(p, { hard: [] });
   assert.equal(p.severity, 5);
 });
+
+test("reset demo clears live data for a supervisor only and keeps baselines", async () => {
+  const { createHttpServer } = await import("../http.js");
+  const store = new Store(); const engine = new Engine(store, { adjacency: {} });
+  store.baselines = [{ zone_id: "Z06", hour: 1, mean_per_15min: 0.2 }];
+  const hub = { sessions: new Map(), mode: () => "tuesday", attach() {} };
+  const server = createHttpServer({ store, engine, hub }); await new Promise((r) => server.listen(0, r));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  try {
+    await fetch(`${base}/demo/relay`, { method: "POST" });
+    assert.equal(store.incidents.length, 1);
+    assert.equal((await fetch(`${base}/demo/reset`, { method: "POST", headers: { authorization: "Bearer dev-dispatcher" } })).status, 401);
+    const out = await (await fetch(`${base}/demo/reset`, { method: "POST", headers: { authorization: "Bearer dev-supervisor" } })).json();
+    assert.equal(out.cleared.incidents, 1);
+    assert.equal(store.incidents.length, 0); assert.equal(store.packets.length, 0);
+    assert.equal(store.baselines.length, 1);
+    assert.deepEqual(store.events.map((e) => e.event_type), ["demo_reset"]);
+  } finally { server.closeAllConnections?.(); server.close(); }
+});

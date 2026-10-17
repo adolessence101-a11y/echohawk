@@ -22,6 +22,7 @@ Agency and supervisor requests may add `x-agency: <agency id>` and `x-operator: 
 | POST | `/incidents/:id/disposition` | dispatcher | `{ disposition, note? }`: resolved, report_taken, referred, unfounded, duplicate, unable_to_locate | `{ ok, disposition, callback_id }`; closes the incident, clears units, `unable_to_locate` schedules a callback | `incident_closed`, `incident_disposition` |
 | GET | `/units` | anon | — | `{ units[]: { incident_id, zone_id, target, n, unit, status, seconds, limit_s, overdue, next[] }, watchdog_s, dispositions }`, overdue first | — |
 | POST | `/incidents/:id/units/:n/stop` | dispatcher | `{ incident_id }` | `{ ok, unit }`; 409 if the call needs a person or the unit does not cover that type | `unit_stop_added` |
+| POST | `/demo/reset` | supervisor | — | `{ ok, cleared }`; clears live data, keeps baselines, kits, twists | `demo_reset` (open pages reload) |
 | GET | `/nodes` | anon | — | `{ simulated: true, nodes }` pole node positions | — |
 | POST | `/demo/relay` | anon | — | `{ ok, results[] }`; one SOS chirp relayed by three nodes | `packet_created`, `relay_heard` |
 | GET | `/history/rd` | anon | — | past dispatched LAPD calls per district by type | — |

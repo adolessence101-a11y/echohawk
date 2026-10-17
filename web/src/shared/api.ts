@@ -44,6 +44,7 @@ export const api = {
   units: () => getJSON<{ units: UnitRow[]; watchdog_s: Record<string, number>; dispositions: Record<string, string> }>("/units"),
   unitStatus: (tok: string, incidentId: string, n: number, status: string) => post(`/incidents/${enc(incidentId)}/units/${n}/status`, tok, { status }),
   addStop: (tok: string, incidentId: string, n: number, targetId: string) => post(`/incidents/${enc(incidentId)}/units/${n}/stop`, tok, { incident_id: targetId }),
+  resetDemo: (tok: string) => post<{ cleared: Record<string, number> }>("/demo/reset", tok),
   relayDemo: () => fetch("/demo/relay", { method: "POST" }).then((r) => r.ok),
   history: () => getJSON<HistoryFile>("/history/rd"),
   disposition: (tok: string, incidentId: string, disposition: string, note = "") => post<{ callback_id: string | null }>(`/incidents/${enc(incidentId)}/disposition`, tok, { disposition, note }),

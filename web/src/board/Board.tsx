@@ -184,6 +184,13 @@ export function Board() {
     setTimeout(() => setZoneSel(new Set()), 2500);
     document.querySelector(".mappanel")?.scrollIntoView({ behavior: "smooth", block: "center" });
   };
+  const [armReset, setArmReset] = useState(false);
+  const resetDemo = async () => {
+    if (!armReset) { setArmReset(true); setTimeout(() => setArmReset(false), 4000); return; }
+    setArmReset(false);
+    const r = await api.resetDemo(TOK);
+    if (!r.ok) toasts.push(r.data.error || "Could not reset", true); else location.reload();
+  };
   const surge = async () => { setSurging(true); await api.surge().catch(() => false); setTimeout(() => setSurging(false), 5000); };
   const armSound = () => { if (!audio) { try { audio = new (window.AudioContext || (window as any).webkitAudioContext)(); setSoundOn(true); } catch { /* no audio */ } } };
   const sortBy = (k: SortKey) => setSort((s) => ({ k, dir: s.k === k ? (s.dir === 1 ? -1 : 1) : 1 }));
@@ -196,6 +203,7 @@ export function Board() {
         right={<>
           <button className="bellbtn" title={soundOn ? "Alert sound on" : "Click anywhere to turn on alert sound"} onClick={() => setMinimized(false)}>{Icon.bell(alerts.length ? "#f2b43c" : "#8d9aae")}{alerts.length > 0 && <span className="n">{alerts.length}</span>}</button>
           <button className="btn-ghost pubbtn" onClick={() => setCompose({ zones: [], hazard: "" })}>📣 Public alert</button>
+          <button className={`btn-ghost resetbtn ${armReset ? "armed" : ""}`} onClick={resetDemo} title="Clear calls, reports, units and alerts for a fresh demo">{armReset ? "Click again to clear everything" : "↺ Reset demo"}</button>
           <button className="btn-ghost surgebtn" disabled={surging} onClick={surge}>{surging ? "Demo running…" : "▶ Run demo surge"}</button>
         </>} />
 

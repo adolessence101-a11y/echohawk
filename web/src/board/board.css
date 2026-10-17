@@ -166,3 +166,4 @@ svg.links line { stroke: var(--ask); stroke-width: 6; stroke-linecap: round; str
 .nearby button:hover { background: rgba(60, 199, 180, 0.12); }
 .histsel { margin-left: 8px; font-size: 12px; padding: 4px 8px; border-radius: 8px; background: var(--panel2, #18242f); color: inherit; border: 1px solid var(--line, #2a3542); }
 .lcm span.nearby { display: flex; white-space: normal; overflow: visible; text-overflow: clip; }
+.resetbtn.armed { border-color: var(--hand, #e5484d); color: #ff9d9d; background: rgba(229, 72, 77, 0.12); }

@@ -88,6 +88,17 @@ export function createHttpServer({ store, engine, hub }) {
         const out = engine.ingest(packet, { triggers });
         return { status: 201, body: { packet_id: packet.packet_id, incident_id: out.incident?.id || null, rung: out.rung, severity: packet.severity, triage_note: packet.triage_note || null, heard_by: packet.heard_by || [], approx_area: packet.approx_area || null } };
       };
+      // reset the live demo: clears calls, reports, incidents, units, alerts and the event log; keeps baselines, kits,
+      // the twist log and the district map. Supervisor only. Pages listening on the stream reload themselves.
+      if (path === "/demo/reset" && method === "POST") {
+        if (role(req) !== "supervisor") return json(res, 401, { error: "supervisor sign-in required" });
+        const cleared = {};
+        for (const t of ["calls", "turns", "packets", "incidents", "events", "kitShows", "callbacks", "zoneWindows", "costMeter", "broadcasts", "alerts"]) { cleared[t] = (store[t] || []).length; store[t] = []; }
+        store.relays = {};
+        store.save();
+        store.appendEvent({ event_type: "demo_reset", actor: "supervisor", provenance: "firsthand", payload_json: { cleared } });
+        return json(res, 200, { ok: true, cleared });
+      }
       if (path === "/nodes" && method === "GET") return json(res, 200, { simulated: true, nodes: DEMO_NODES });
       // demo: one SOS chirp from a phone near three pole nodes; all three relay it, the board shows one report heard by three
       if (path === "/demo/relay" && method === "POST") {

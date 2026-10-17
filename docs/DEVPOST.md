@@ -33,7 +33,7 @@ On an ordinary Tuesday, the same LAPD operators answer emergency and non-emergen
 
 ## How we built it
 
-IBM Bob scaffolded the repo from our spec and wrote most of the server modules and tests from scoped prompts (`docs/prompts.md`, evidence in `docs/BOB_LOG.md` with tests before and after and commit shas). Claude handles extraction, replies and translation inside the Retell custom LLM websocket, so our server owns every turn, the triggers and the transfer decision. The screens are React and TypeScript on Vite. The engine, triggers and frame format have 96 automated tests, including a fake Retell client driving a real websocket.
+IBM Bob scaffolded the repo from our spec and wrote most of the server modules and tests from scoped prompts (`docs/prompts.md`, evidence in `docs/BOB_LOG.md` with tests before and after and commit shas). Claude handles extraction, replies and translation inside the Retell custom LLM websocket, so our server owns every turn, the triggers and the transfer decision. The screens are React and TypeScript on Vite. The engine, triggers and frame format have 97 automated tests, including a fake Retell client driving a real websocket.
 
 ## Challenges
 
