@@ -1,10 +1,11 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { api, token } from "../shared/api";
-import type { Call, Incident, Kit, Packet, Turn, Unit } from "../shared/types";
+import type { Call, Incident, Kit, Packet, Unit } from "../shared/types";
 import { useEvents, useRefresher } from "../shared/sse";
 import { duration, hms, useTick } from "../shared/time";
 import { DeployBar, Toasts, UnitChips, useToasts } from "../shared/ui";
 import { AppHeader, Icon, SUPERVISOR_TABS } from "../shared/Brand";
+import { LiveCall } from "../shared/LiveCall";
 import { rdOf } from "../shared/laMap";
 import { RUNG_LABEL, suggest, tName, trig, unitLabel } from "../shared/labels";
 import { buildItems, type Item } from "./items";
@@ -14,7 +15,6 @@ const TOK = token("dev-dispatcher");
 const LANG: Record<string, string> = { en: "English", es: "Spanish" };
 const langName = (l?: string) => LANG[l || ""] || "Language not set";
 const district = (z?: string | null) => (z ? `Zone ${rdOf(z)}` : "Zone ?");
-const SR: any = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
 
 function kitIcon(k: Kit) {
   const c = "#c2cbd8";
@@ -35,18 +35,12 @@ export function Console() {
   const [incs, setIncs] = useState<Incident[]>([]);
   const [kits, setKits] = useState<Kit[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
-  const [turns, setTurns] = useState<Turn[]>([]);
   const [packets, setPackets] = useState<Packet[]>([]);
   const [joined, setJoined] = useState<Set<string>>(new Set());
   const [flagOpen, setFlagOpen] = useState(false);
-  const [say, setSay] = useState("");
-  const [lang, setLang] = useState("en");
-  const [mic, setMic] = useState(false);
   const [sim, setSim] = useState(false);
   const [version, setVersion] = useState(0);
   const toasts = useToasts();
-  const body = useRef<HTMLDivElement>(null);
-  const rec = useRef<any>(null);
   useTick();
 
   const refresh = async () => {
@@ -65,17 +59,18 @@ export function Console() {
     const g = (x: Item) => (x.lane === "need" ? 0 : x.live ? 1 : x.lane === "ai" ? 2 : 3);
     return [...all].sort((a, b) => g(a) - g(b) || +new Date(b.last_at || b.start) - +new Date(a.last_at || a.start));
   }, [calls, incs]);
-  const it = items.find((x) => x.id === selected) || items[0];
+  const callsOnly = items.filter((x) => x.kind === "call");
+  const groups: [string, Item[]][] = [["Calls", [...callsOnly].sort((a, b) => Number(b.live) - Number(a.live) || (a.lane === "need" ? 0 : 1) - (b.lane === "need" ? 0 : 1) || +new Date(b.start) - +new Date(a.start))], ["Reports from the AI line", items.filter((x) => x.kind === "report")]];
+  const ordered = groups.flatMap(([, l]) => l);
+  const it = items.find((x) => x.id === selected) || ordered[0];
   const liveCount = items.filter((x) => x.live).length;
 
   useEffect(() => {
     if (!it) return;
     let alive = true;
-    if (it.kind === "call") api.transcript(it.id).then((t) => alive && setTurns(t)).catch(() => {});
-    else { setTurns([]); api.incident(it.id).then((d) => alive && setPackets(d.packets || [])).catch(() => {}); }
+    if (it.kind !== "call") api.incident(it.id).then((d) => alive && setPackets(d.packets || [])).catch(() => {});
     return () => { alive = false; };
   }, [it?.id, it?.kind, version]);
-  useEffect(() => { if (body.current) body.current.scrollTop = body.current.scrollHeight; }, [turns.length, packets.length, it?.id]);
   useEffect(() => { setFlagOpen(false); }, [it?.id]);
 
   // ---------- actions ----------
@@ -104,19 +99,16 @@ export function Console() {
     if (x.kind === "call") return flag(x, "supervisor");
     const r = await api.ack(TOK, x.id); r.ok ? toasts.push("Pushed to the supervisor") : toasts.push("failed", true);
   };
-  const send = async (text = say) => {
-    if (!it) return; const t = text.trim(); if (!t) return; setSay("");
-    const r = await api.say(TOK, it.id, t, lang);
-    r.ok ? refresh() : toasts.push(r.data.error || "Join the call first", true);
-  };
-  const micDown = () => {
-    if (!SR) return toasts.push("Speech recognition is not available in this browser; type instead", true);
-    const r = new SR(); r.interimResults = false; r.lang = lang === "es" ? "es-MX" : "en-US";
-    r.onresult = (e: any) => send(e.results[0][0].transcript); rec.current = r; r.start(); setMic(true);
-  };
   const pushKit = async (k: Kit) => {
     if (!it || it.kind !== "call" || !it.live) return toasts.push("Pick a live call to send a kit card.", true);
     const r = await api.kit(TOK, it.id, k.kit_id); toasts.push(r.ok ? `${k.title} sent to the caller` : "failed", !r.ok);
+  };
+  const [demoCall, setDemoCall] = useState(false);
+  const simulateCall = async () => {
+    setDemoCall(true);
+    const r = await fetch("/demo/call", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ scenario: "spanish_water" }) }).catch(() => null);
+    toasts.push(r?.ok ? "A Spanish-speaking caller is on the line. Click the call to listen in." : "Could not start the demo call", !r?.ok);
+    setTimeout(() => { setDemoCall(false); refresh().then(() => setSelected(null)); }, 2500);
   };
   const simulate = async () => { setSim(true); const ok = await api.surge().catch(() => false); toasts.push(ok ? "20 scripted calls are coming in" : "simulation failed", !ok); setTimeout(() => setSim(false), 4000); };
 
@@ -124,9 +116,9 @@ export function Console() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if ((e.target as HTMLElement).matches("input, select, textarea") || e.metaKey || e.ctrlKey || e.altKey) return;
-      const k = e.key.toLowerCase(), cur = items.findIndex((x) => x.id === it?.id);
-      if (k === "j" || k === "arrowdown") { e.preventDefault(); const n = items[Math.min(items.length - 1, cur + 1)]; if (n) setSelected(n.id); return; }
-      if (k === "k" || k === "arrowup") { e.preventDefault(); const n = items[Math.max(0, cur - 1)]; if (n) setSelected(n.id); return; }
+      const k = e.key.toLowerCase(), cur = ordered.findIndex((x) => x.id === it?.id);
+      if (k === "j" || k === "arrowdown") { e.preventDefault(); const n = ordered[Math.min(ordered.length - 1, cur + 1)]; if (n) setSelected(n.id); return; }
+      if (k === "k" || k === "arrowup") { e.preventDefault(); const n = ordered[Math.max(0, cur - 1)]; if (n) setSelected(n.id); return; }
       if (!it) return;
       const unit = ({ e: "ems", f: "fire", p: "police", u: "utility", c: "callback" } as Record<string, Unit>)[k];
       if (unit) deploy(it, unit);
@@ -137,7 +129,6 @@ export function Console() {
     addEventListener("keydown", onKey); return () => removeEventListener("keydown", onKey);
   });
 
-  const isJoined = !!it && (joined.has(it.id) || it.status === "transferred");
   const live = !!it && it.kind === "call" && it.live;
 
   return (
@@ -149,18 +140,23 @@ export function Console() {
       <main className="dgrid">
         {/* ---------- live calls ---------- */}
         <section className="panel calls">
-          <div className="ptitle">Live calls ({liveCount})<span className="spacer" /><span className="sortlbl">{items.length - liveCount > 0 ? `+${items.length - liveCount} reports · ` : ""}urgent first ▾</span></div>
+          <div className="ptitle">Live calls ({liveCount})<span className="spacer" /><button className="btn-ghost demo-call" disabled={demoCall} onClick={simulateCall}>{demoCall ? "Caller connecting…" : "▶ Simulate a live call"}</button></div>
           <div className="clist">
-            {!items.length && <div className="empty" style={{ margin: 14 }}>No calls yet. Press ▶ Simulate calls, or call the Retell number.</div>}
-            {items.map((x) => (
-              <div key={x.id} className={`crow ${x.id === it?.id ? "on" : ""} ${x.lane === "need" ? "need" : ""}`} onClick={() => setSelected(x.id)}>
-                <span className="cic" style={{ background: x.id === it?.id && x.lane === "need" ? "#e5484d" : "transparent" }}>{Icon.phoneSolid(x.id === it?.id && x.lane === "need" ? "#fff" : rowColor(x), 20)}</span>
-                <div className="cmain">
-                  <div className="cl1">{x.kind === "call" ? langName(x.language) : "Caller report"} · {district(x.zone)}</div>
-                  <div className="cl2">{tName(x.target)}{x.triggers.length > 0 && <span className="dotred" title="life-safety words heard" />}{x.flags.length > 0 && <span className="flagmark">⚑</span>}{x.dispatched.length > 0 && <span className="sentmark">✓ sent</span>}</div>
-                </div>
-                <span className="ctime">{x.live ? <span className="livedot">● {duration(x.start)}</span> : hms(x.last_at || x.start).slice(0, 5)}</span>
-                {Icon.chevron("#8d9aae")}
+            {!items.length && <div className="empty" style={{ margin: 14 }}>No calls yet. Press ▶ Simulate a live call, or call the Retell number.</div>}
+            {groups.map(([label, list]) => list.length > 0 && (
+              <div key={label}>
+                <div className="cgroup">{label}<span>{list.length}</span></div>
+                {list.map((x) => (
+                  <div key={x.id} className={`crow ${x.id === it?.id ? "on" : ""} ${x.lane === "need" ? "need" : ""}`} onClick={() => setSelected(x.id)}>
+                    <span className="cic" style={{ background: x.id === it?.id && x.lane === "need" ? "#e5484d" : "transparent" }}>{Icon.phoneSolid(x.id === it?.id && x.lane === "need" ? "#fff" : rowColor(x), 20)}</span>
+                    <div className="cmain">
+                      <div className="cl1">{x.kind === "call" ? langName(x.language) : "Caller report"} · {district(x.zone)}</div>
+                      <div className="cl2">{tName(x.target)}{x.triggers.length > 0 && <span className="dotred" title="life-safety words heard" />}{x.flags.length > 0 && <span className="flagmark">⚑</span>}{x.dispatched.length > 0 && <span className="sentmark">✓ sent</span>}{x.kind === "call" && x.status === "transferred" && x.live && <span className="sentmark">you have it</span>}</div>
+                    </div>
+                    <span className="ctime">{x.live ? <span className="livedot">● {duration(x.start)}</span> : hms(x.last_at || x.start).slice(0, 5)}</span>
+                    {Icon.chevron("#8d9aae")}
+                  </div>
+                ))}
               </div>
             ))}
           </div>
@@ -197,40 +193,18 @@ export function Console() {
               {(it.triggers.length > 0 || it.flags.length > 0 || it.dispatched.length > 0) && (
                 <div className="chips pad">{it.triggers.map((t) => <span key={t} className="chip trig">⚠ heard: {trig(t)}</span>)}{it.flags.map((f) => <span key={f} className="chip flag">⚑ {f.replace(/_/g, " ")}</span>)}<UnitChips dispatched={it.dispatched} /></div>
               )}
-              <div className="bubbles" ref={body}>
-                {it.kind === "call" ? (
-                  turns.length ? turns.map((t, k) => {
-                    const mine = t.role !== "user";
-                    const who = t.role === "user" ? "R" : t.role === "agent" ? "AI" : "D";
-                    const trLabel = t.role === "user" ? "Translation (English)" : `${langName(it.language)} (to caller)`;
-                    return (
-                      <div key={k} className={`msg ${mine ? "me" : ""} ${t.role}`}>
-                        {!mine && <span className="av">{who}</span>}
-                        <div className="bub">
-                          <div className="txt">{t.text_original}</div>
-                          {t.text_translated && <div className="tr"><span>{trLabel}</span>{t.text_translated}</div>}
-                        </div>
-                        {mine && <span className={`av ${t.role}`}>{who}</span>}
-                      </div>
-                    );
-                  }) : <div className="placeholder">Waiting for the caller's first words.</div>
-                ) : (
+              {it.kind === "call" ? (
+                <LiveCall call={{ id: it.id, language: it.language, live: it.live, status: it.status }} tok={TOK} version={version} joined={joined.has(it.id)}
+                  onJoined={() => setJoined((s) => new Set(s).add(it.id))} onChanged={refresh} toast={toasts.push} />
+              ) : (
+                <div className="bubbles">
                   <div className="report">
                     <div className="rwhy">{human(it)}</div>
                     <div className="rsec">Reports on this line ({packets.length})</div>
                     {packets.map((p) => <div key={p.packet_id} className="rrow"><span>{p.source === "telemetry" ? "Alarm or sensor" : p.source === "voice" ? "Caller" : p.source}</span><span>{tName(p.target)}</span><span>severity {p.severity}</span><span className="muted">{hms(p.received_at)}</span></div>)}
                     <div className="eng">Engine log: {it.reason}</div>
+                    <div className="lc-hint" style={{ marginTop: 10 }}>This line was built from calls the AI already finished. Live calls you can listen to or take over are under Calls on the left.</div>
                   </div>
-                )}
-              </div>
-              {it.kind === "call" && (
-                <div className="composer">
-                  <span className="clip">{Icon.clip("#8d9aae")}</span>
-                  <select value={lang} onChange={(e) => setLang(e.target.value)} title="The language you type in"><option value="en">EN</option><option value="es">ES</option></select>
-                  <input value={say} onChange={(e) => setSay(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") send(); }} disabled={!live || !isJoined} placeholder={!live ? "This call has ended" : isJoined ? "Type a message to the caller..." : "Join interpreter to talk to the caller"} />
-                  <button className={`micbtn ${mic ? "on" : ""}`} disabled={!live || !isJoined} onMouseDown={micDown} onMouseUp={() => { rec.current?.stop(); setMic(false); }} title="Hold to talk">{Icon.mic(mic ? "#3cc7b4" : "#c2cbd8")}</button>
-                  <button className="btn-teal" disabled={!live || !isJoined} onClick={() => send()}>Send</button>
-                  <button className={`joinbtn ${isJoined ? "on" : ""}`} disabled={!live || isJoined} onClick={() => join(it)}>{Icon.users(isJoined ? "#3cc7b4" : "#dbe2ec")} {isJoined ? "Interpreter on" : "Join interpreter"}</button>
                 </div>
               )}
             </>

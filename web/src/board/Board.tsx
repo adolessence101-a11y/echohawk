@@ -1,9 +1,10 @@
 import { Fragment, useMemo, useRef, useState } from "react";
 import { api, token } from "../shared/api";
-import type { EventRow, Health, Incident, OpenCallback, Unit, ZoneWindow } from "../shared/types";
+import type { Call, EventRow, Health, Incident, OpenCallback, Unit, ZoneWindow } from "../shared/types";
 import { useEvents, useRefresher } from "../shared/sse";
-import { ago, hms } from "../shared/time";
-import { DeployBar, UnitChips } from "../shared/ui";
+import { ago, duration, hms, useTick } from "../shared/time";
+import { DeployBar, Toasts, UnitChips, useToasts } from "../shared/ui";
+import { LiveCall, langName } from "../shared/LiveCall";
 import { AppHeader, Icon, SUPERVISOR_TABS } from "../shared/Brand";
 import { rdOf } from "../shared/laMap";
 import { isMachineOnly, plainReason, suggest, tName, trig } from "../shared/labels";
@@ -42,6 +43,13 @@ type SortKey = "priority" | "district" | "report" | "sources";
 
 export function Board() {
   const [inc, setInc] = useState<Incident[]>([]);
+  const [calls, setCalls] = useState<Call[]>([]);
+  const [listen, setListen] = useState<string | null>(null);
+  const [joinedCalls, setJoinedCalls] = useState<Set<string>>(new Set());
+  const [version, setVersion] = useState(0);
+  const [demoCall, setDemoCall] = useState(false);
+  const toasts = useToasts();
+  useTick();
   const [win, setWin] = useState<ZoneWindow[]>([]);
   const [health, setHealth] = useState<Health | null>(null);
   const [cbs, setCbs] = useState<OpenCallback[]>([]);
@@ -68,7 +76,9 @@ export function Board() {
   incRef.current = byId;
 
   const refresh = async () => {
-    const [a, b, c, e] = await Promise.allSettled([api.incidents(), api.windows(), api.health(), api.callbacks()]);
+    const [a, b, c, e, f] = await Promise.allSettled([api.incidents(), api.windows(), api.health(), api.callbacks(), api.calls()]);
+    if (f.status === "fulfilled" && Array.isArray(f.value)) setCalls(f.value);
+    setVersion((v) => v + 1);
     if (a.status === "fulfilled" && Array.isArray(a.value)) { setInc(a.value); incRef.current = Object.fromEntries(a.value.map((i) => [i.id, i])); }
     if (b.status === "fulfilled" && Array.isArray(b.value)) setWin(b.value);
     if (c.status === "fulfilled") setHealth(c.value);
@@ -126,6 +136,16 @@ export function Board() {
     return d * sort.dir;
   });
   const selInc = sel ? byId[sel] || null : null;
+  const liveCalls = calls.filter((c) => !c.ended_at).sort((a, b) => +new Date(a.started_at) - +new Date(b.started_at));
+  const recentCalls = calls.filter((c) => c.ended_at).sort((a, b) => +new Date(b.started_at) - +new Date(a.started_at)).slice(0, 4);
+  const listenCall = listen ? calls.find((c) => c.id === listen) || null : null;
+  const liveCallFor = (incId: string) => liveCalls.find((c) => c.incident_id === incId);
+  const simulateCall = async () => {
+    setDemoCall(true);
+    const r = await fetch("/demo/call", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ scenario: "spanish_water" }) }).catch(() => null);
+    toasts.push(r?.ok ? "A Spanish-speaking caller is on the line. Open it under Live calls to listen in." : "Could not start the demo call", !r?.ok);
+    setTimeout(() => { setDemoCall(false); refresh(); }, 2500);
+  };
 
   // ---------- actions ----------
   const deploy = async (ids: string[], unit: Unit) => {
@@ -204,7 +224,7 @@ export function Board() {
         <div className="stat"><span className="si">{Icon.person("#e5484d")}</span><div><span>Needs a person</span><b>{String(n.hand).padStart(2, "0")}</b></div></div>
         <div className="stat"><span className="si">{Icon.clipboard("#f2b43c")}</span><div><span>Verify</span><b>{String(n.ask).padStart(2, "0")}</b></div></div>
         <div className="stat"><span className="si">{Icon.eye("#4c9cf0")}</span><div><span>Watching</span><b>{String(n.watch).padStart(2, "0")}</b></div></div>
-        <div className="stat"><span className="si">{Icon.phone("#3cc7b4")}</span><div><span>Active calls</span><b>{String(health?.calls_active ?? 0).padStart(2, "0")}</b></div></div>
+        <div className="stat clickable" onClick={() => { if (liveCalls[0]) setListen(liveCalls[0].id); else document.getElementById("livecalls")?.scrollIntoView({ behavior: "smooth", block: "center" }); }} title="Listen to live calls"><span className="si">{Icon.phone("#3cc7b4")}</span><div><span>Active calls</span><b>{String(health?.calls_active ?? 0).padStart(2, "0")}</b></div></div>
       </div>
 
       <div className="split">
@@ -234,7 +254,8 @@ export function Board() {
                   <div className="dacts">
                     <DeployBar withCallback={false} dispatched={selInc.dispatched} suggested={suggest(undefined, selInc.target)} onSend={(u) => deploy([selInc.id], u)} />
                     <span className="spacer" />
-                    <button onClick={() => ack(selInc.id)} disabled={acked.has(selInc.id)}>{acked.has(selInc.id) ? "Seen" : "Mark seen"}</button>
+                    {liveCallFor(selInc.id) && <button className="listenbtn" onClick={() => setListen(liveCallFor(selInc.id)!.id)}>{Icon.phone("#3cc7b4", 14)} Listen to the live call</button>}
+                <button onClick={() => ack(selInc.id)} disabled={acked.has(selInc.id)}>{acked.has(selInc.id) ? "Seen" : "Mark seen"}</button>
                     <button onClick={() => closeInc(selInc.id)}>Close</button>
                   </div>
                 </div>
@@ -275,7 +296,28 @@ export function Board() {
         <span title="Confidence is 1 - p^n over independent callers, not a calibrated probability.">{Icon.info("#8d9aae")}</span>
       </div>
 
-      <div className="lower">
+      <div className="lower three">
+        <section className="panel" id="livecalls"><div className="ptitle">Live calls<span className="livecount">{liveCalls.length}</span><span className="spacer" /><button className="btn-ghost demo-call" disabled={demoCall} onClick={simulateCall}>{demoCall ? "Connecting…" : "▶ Simulate a live call"}</button></div>
+          <div className="lcl">
+            {!liveCalls.length && <div className="muted lcempty">No one on the line right now. Calls appear here the moment Retell connects them.</div>}
+            {liveCalls.map((c) => (
+              <div key={c.id} className="lcrow" onClick={() => setListen(c.id)}>
+                <span className="lcdot" />
+                <div className="lcm"><b>{langName(c.language)} · {c.zone_id && c.zone_id !== "unknown" ? `District ${rdOf(c.zone_id)}` : "zone not given yet"}</b><span>{(c.last_turns || []).filter((t) => t.role === "user").slice(-1)[0]?.text || "AI is answering…"}</span></div>
+                <span className="lct">{duration(c.started_at)}</span>
+                <button className="listenbtn" onClick={(e) => { e.stopPropagation(); setListen(c.id); }}>{Icon.phone("#3cc7b4", 14)} Listen</button>
+              </div>
+            ))}
+            {recentCalls.length > 0 && <div className="lcsub">Ended</div>}
+            {recentCalls.map((c) => (
+              <div key={c.id} className="lcrow ended" onClick={() => setListen(c.id)}>
+                <span className="lcdot off" />
+                <div className="lcm"><b>{langName(c.language)} · {c.zone_id && c.zone_id !== "unknown" ? `District ${rdOf(c.zone_id)}` : "no zone"}</b><span>{tName(c.target)}{c.status === "transferred" ? " · handed to a dispatcher" : ""}</span></div>
+                <span className="lct">{hms(c.started_at).slice(0, 5)}</span>
+              </div>
+            ))}
+          </div>
+        </section>
         <section className="panel"><div className="ptitle">Alert history</div>
           <div className="feed">
             {!hist.length && <div className="muted">No alerts yet.</div>}
@@ -291,6 +333,25 @@ export function Board() {
           </div>
         </section>
       </div>
+      {listenCall && (
+        <div className="slideover" onClick={() => setListen(null)}>
+          <div className="sopanel" onClick={(e) => e.stopPropagation()}>
+            <div className="sohead">
+              <div><b>{langName(listenCall.language)} caller · {listenCall.zone_id && listenCall.zone_id !== "unknown" ? `District ${rdOf(listenCall.zone_id)}` : "zone not given yet"}</b>
+                <span>{tName(listenCall.target)}{listenCall.rung ? ` · ${listenCall.rung === "hand" ? "needs a person" : listenCall.rung === "ask" ? "verify" : "watching"}` : ""}</span></div>
+              <span className="spacer" />
+              {!listenCall.ended_at ? <span className="livetag"><i />Live · {duration(listenCall.started_at)}</span> : <span className="muted small">ended · {duration(listenCall.started_at, listenCall.ended_at)}</span>}
+              <button className="x" onClick={() => setListen(null)}>✕</button>
+            </div>
+            {listenCall.incident_id && byId[listenCall.incident_id] && (
+              <div className="soacts"><DeployBar size="sm" withCallback={false} dispatched={byId[listenCall.incident_id].dispatched} suggested={suggest(listenCall.action, listenCall.target)} onSend={(u) => deploy([listenCall.incident_id!], u)} /></div>
+            )}
+            <LiveCall call={{ id: listenCall.id, language: listenCall.language, live: !listenCall.ended_at, status: listenCall.status }} tok={TOK} version={version} joined={joinedCalls.has(listenCall.id)}
+              onJoined={() => setJoinedCalls((s) => new Set(s).add(listenCall.id))} onChanged={refresh} toast={toasts.push} showTakeover />
+          </div>
+        </div>
+      )}
+      <Toasts items={toasts.items} />
     </div>
   );
 }

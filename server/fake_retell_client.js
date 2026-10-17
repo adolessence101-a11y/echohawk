@@ -1,6 +1,6 @@
 // Drives the websocket the way Retell does, so A1 passes with no phone and no credits.
 // Usage: node server/fake_retell_client.js [ws://localhost:8787] [scenario] [--hold SECONDS]
-// Scenarios: water | bleeding | breathing | spanish | hangup
+// Scenarios: water | bleeding | breathing | spanish | spanish_water | hangup
 // --hold keeps the call open after the script so a dispatcher can Join from /console and push Interpreter Mode lines.
 import WebSocket from "ws";
 
@@ -15,13 +15,14 @@ const scripts = {
   bleeding: ["Zone Z02.", "My husband cut his leg and he's bleeding badly, there's blood everywhere."],
   breathing: ["Zone Z09, my mother collapsed.", "She's sort of breathing, like gasping."],
   spanish: ["Zona Z04.", "Se fue la luz en mi casa, nada más quería saber cuándo regresa."],
+  spanish_water: ["Zona seis.", "No tenemos agua en la casa. La presión bajó hace unos minutos.", "Mi vecina de al lado tampoco tiene agua."],
   hangup: ["uh"],
 };
 const lines = scripts[scenario] || scripts.water;
 const transcript = [{ role: "agent", content: "This is the EchoHawk line. How can I help?" }];
 let i = 0, rid = 0;
 const ws = new WebSocket(`${base}/retell/llm/${callId}`);
-ws.on("open", () => { console.log("connected", callId); ws.send(JSON.stringify({ interaction_type: "call_details", call: { call_id: callId, metadata: { language: scenario === "spanish" ? "es" : "en" } } })); setTimeout(next, 300); });
+ws.on("open", () => { console.log("connected", callId); ws.send(JSON.stringify({ interaction_type: "call_details", call: { call_id: callId, metadata: { language: scenario.startsWith("spanish") ? "es" : "en" } } })); setTimeout(next, 300); });
 ws.on("message", (raw) => {
   const m = JSON.parse(raw.toString());
   if (m.response_type === "config") return console.log("config", m.config);
