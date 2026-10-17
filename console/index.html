@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>EchoHawk Dispatcher Console</title>
+<style>
+  :root { --bg:#0f1115; --panel:#171a21; --line:#262b36; --text:#e8eaf0; --muted:#8b93a7; --hand:#ff5d5d; --ask:#ffb020; --watch:#5aa0ff; --me:#3ddc97; }
+  * { box-sizing:border-box } body { margin:0; background:var(--bg); color:var(--text); font:14px/1.45 system-ui,-apple-system,Segoe UI,Roboto,sans-serif }
+  header { display:flex; align-items:center; gap:16px; padding:12px 20px; border-bottom:1px solid var(--line) } h1 { font-size:16px; margin:0 }
+  main { display:grid; grid-template-columns: 320px 1fr 300px; gap:16px; padding:16px 20px; height: calc(100vh - 54px) }
+  section { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:14px; overflow:auto }
+  h2 { margin:0 0 10px; font-size:13px; text-transform:uppercase; letter-spacing:.8px; color:var(--muted) }
+  .call { padding:10px; border:1px solid var(--line); border-radius:8px; margin-bottom:8px; cursor:pointer } .call.sel { border-color:#3a4256; background:#1c2029 } .call small { color:var(--muted) }
+  .rung { display:inline-block; padding:1px 7px; border-radius:999px; font-weight:600; font-size:11px; color:#0f1115 } .rung.hand{background:var(--hand)} .rung.ask{background:var(--ask)} .rung.watch{background:var(--watch)}
+  .turn { padding:8px 10px; border-radius:8px; margin:6px 0; max-width:85% } .turn.user { background:#1e2431 } .turn.agent { background:#212a22; margin-left:auto } .turn.dispatcher { background:#1f2d2a; margin-left:auto; border:1px solid var(--me) }
+  .turn .orig { color:var(--text) } .turn .tr { color:var(--muted); font-size:12px; margin-top:4px } .turn .who { font-size:11px; color:var(--muted); margin-bottom:2px }
+  .interp { display:flex; gap:8px; margin-top:10px } input, select { background:#12151c; color:var(--text); border:1px solid var(--line); border-radius:6px; padding:8px } input { flex:1 }
+  button { background:#232838; color:var(--text); border:1px solid var(--line); border-radius:6px; padding:8px 12px; cursor:pointer } button.live { border-color:var(--me); color:var(--me) } button.danger { border-color:var(--hand); color:var(--hand) }
+  .kit { border:1px solid var(--line); border-radius:8px; padding:10px; margin-bottom:8px } .kit small { color:var(--muted) } .fields { color:var(--muted); font-size:12px; margin:6px 0 }
+  .note { color:var(--muted); font-size:12px; margin-top:8px }
+</style>
+</head>
+<body>
+<header><h1>EchoHawk · Dispatcher Console</h1><span id="status" class="note"></span></header>
+<main>
+  <section>
+    <h2>Live calls</h2>
+    <div id="calls"></div>
+    <div class="note">Click a call. "Join" turns on Interpreter Mode: you speak or type in your language, the caller hears theirs. The AI goes quiet while you're joined.</div>
+  </section>
+  <section>
+    <h2 id="title">Transcript</h2>
+    <div class="fields" id="fields"></div>
+    <div id="transcript"></div>
+    <div class="interp">
+      <select id="lang"><option value="en">I speak English</option><option value="es">Hablo español</option></select>
+      <input id="say" placeholder="Type what the caller should hear (translated automatically). Or hold the mic." disabled>
+      <button id="mic" disabled title="Hold to talk">🎙 hold</button>
+      <button id="send" disabled>Say</button>
+    </div>
+    <div class="interp">
+      <button id="join" disabled class="live">Join (Interpreter Mode)</button>
+      <button id="transfer" disabled class="danger">Take the call (transfer)</button>
+    </div>
+  </section>
+  <section>
+    <h2>Kit controls</h2>
+    <div id="kits"></div>
+    <div class="note">The AI only selects cards from this catalog and reads them verbatim. Swapping or closing a card is logged as kit_changed_by_human.</div>
+  </section>
+</main>
+<script>
+const token = new URLSearchParams(location.search).get("token") || "dev-dispatcher";
+const H = { authorization: `Bearer ${token}`, "content-type": "application/json" };
+const $ = (id) => document.getElementById(id);
+let selected = null, joined = false, catalog = null;
+async function loadCalls() {
+  const calls = await fetch("/calls?status=active").then(r=>r.json());
+  $("calls").innerHTML = calls.map(c => `<div class="call ${c.id===selected?"sel":""}" onclick="select('${c.id}')"><b>${c.id}</b> ${c.rung?`<span class="rung ${c.rung}">${c.rung}</span>`:""}<br><small>${c.language||"und"} · ${c.target||"?"} sev ${c.severity||"?"} · ${c.zone_id||"?"} · ${Math.floor(c.elapsed_s/60)}m${c.elapsed_s%60}s · ${c.status}</small></div>`).join("") || `<div class="note">No live calls. Run <code>npm run fake-call -- ws://localhost:8787 spanish</code> to simulate one.</div>`;
+}
+async function select(id) { selected = id; joined = false; ["join","transfer"].forEach(b => $(b).disabled = false); ["say","mic","send"].forEach(b => $(b).disabled = true); $("join").textContent = "Join (Interpreter Mode)"; await loadCalls(); await loadTranscript(); }
+async function loadTranscript() {
+  if (!selected) return;
+  const turns = await fetch(`/calls/${selected}/transcript`).then(r=>r.json());
+  $("title").textContent = `Transcript · ${selected}`;
+  $("transcript").innerHTML = turns.map(t => `<div class="turn ${t.role}"><div class="who">${t.role}${t.lang_original?` · ${t.lang_original}`:""}</div><div class="orig">${esc(t.text_original)}</div>${t.text_translated?`<div class="tr">→ ${esc(t.text_translated)}</div>`:""}</div>`).join("");
+  $("transcript").lastElementChild?.scrollIntoView({block:"end"});
+  const calls = await fetch("/calls?status=active").then(r=>r.json()); const c = calls.find(x=>x.id===selected);
+  $("fields").textContent = c ? `zone ${c.zone_id||"?"} · target ${c.target||"?"} · severity ${c.severity||"?"} · rung ${c.rung||"none"} · transfer path ${c.transfer_path}` : "";
+}
+const esc = (s) => String(s||"").replace(/[&<>]/g, (m) => ({"&":"&amp;","<":"&lt;",">":"&gt;"}[m]));
+$("join").onclick = async () => { if (!selected) return; const r = await fetch(`/calls/${selected}/join`, {method:"POST", headers:H, body:JSON.stringify({dispatcher_id:"console"})}); if (r.ok) { joined = true; ["say","mic","send"].forEach(b => $(b).disabled = false); $("join").textContent = "Joined · AI is quiet"; } else alert("call not live"); };
+$("send").onclick = say; $("say").addEventListener("keydown", (e) => { if (e.key === "Enter") say(); });
+async function say() { const text = $("say").value.trim(); if (!text || !selected) return; $("say").value = ""; const r = await fetch(`/calls/${selected}/say`, {method:"POST", headers:H, body:JSON.stringify({text, lang_from: $("lang").value})}); const j = await r.json(); $("status").textContent = r.ok ? `sent in ${j.lang_to}: ${j.sent_text}` : (j.error||"failed"); loadTranscript(); }
+$("transfer").onclick = async () => { if (!selected) return; alert("Transfer path is driven by the server (TRANSFER_NUMBER in .env). Primary warm path: confirm at the 10:30 Retell session. Fallback A (cold + brief on this screen) is wired."); };
+// Hold-to-talk with the browser's speech recognition; typed input is the fallback (A13 passes either way).
+const SR = window.SpeechRecognition || window.webkitSpeechRecognition; let rec = null;
+if (SR) { rec = new SR(); rec.interimResults = false; rec.onresult = (e) => { $("say").value = e.results[0][0].transcript; say(); }; $("mic").onmousedown = () => { rec.lang = $("lang").value === "es" ? "es-MX" : "en-US"; rec.start(); $("mic").classList.add("live"); }; $("mic").onmouseup = () => { rec.stop(); $("mic").classList.remove("live"); }; } else { $("mic").title = "Speech recognition not available in this browser; type instead"; }
+async function loadKits() { catalog = await fetch("/kits").then(r=>r.json()); $("kits").innerHTML = catalog.kits.map(k => `<div class="kit"><b>${k.title}</b><br><small>${k.kit_id} · ${k.mode} · review: ${k.medical_review}</small><br><button onclick="pushKit('${k.kit_id}')">Show to caller</button></div>`).join("") + `<div class="kit"><button onclick="pushKit(null)">Close current card</button></div>`; }
+async function pushKit(id) { if (!selected) return alert("select a call"); const r = await fetch(`/calls/${selected}/kit`, {method:"POST", headers:H, body:JSON.stringify({kit_id:id})}); $("status").textContent = r.ok ? (id ? `card ${id} pushed` : "card closed") : "failed"; }
+const es = new EventSource("/events/stream");
+["turn_added","turn_translated","dispatcher_said","call_started","call_ended","transfer_started","kit_shown","rung_changed","packet_created"].forEach(t => es.addEventListener(t, () => { loadCalls(); loadTranscript(); }));
+loadCalls(); loadKits(); setInterval(loadCalls, 5000);
+</script>
+</body>
+</html>
