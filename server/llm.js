@@ -97,7 +97,8 @@ export async function extractFields(transcriptText) {
     const target = TARGETS.includes(j.target) ? j.target : rules.target;
     const action = ACTIONS.includes(j.action) ? j.action : (ACTION_FOR_TARGET[target] || "unknown");
     const severity = Number.isInteger(j.severity) && j.severity >= 1 && j.severity <= 5 ? j.severity : rules.severity;
-    const zone_id = j.zone_id || rules.zone_id;
+    // trust our own parser's code first (it knows Z06 vs RD 0812); otherwise normalize what the model said
+    const zone_id = rules.zone_id || normalizeZone(j.zone_id);
     return { zone_id, target, severity, action, complete: Boolean(zone_id && target !== "unknown") };
   } catch { return rules; }
 }
@@ -167,4 +168,16 @@ export function nextFallbackLine(transcript, { fields, language = "en" }) {
   }
   if (NO.test(lastUser) || /\b(that's it|that is all|eso es todo|bye|adi[oó]s)\b/i.test(lastUser)) return { content: f.bye, end_call: true };
   return { content: f.more(z) };
+}
+
+// "6", "06", "zone 6", "z6" -> Z06 (demo grid); "802", "0802", "RD 0802" -> 0802 (LAPD district); anything else as-is.
+export function normalizeZone(z) {
+  if (z == null) return null;
+  const t = String(z).trim();
+  if (!t || /^(unknown|null|none)$/i.test(t)) return null;
+  const m = t.match(/^(?:zone|zona|z)?\s*0?(\d{1,2})$/i);
+  if (m && Number(m[1]) >= 1 && Number(m[1]) <= 16) return `Z${m[1].padStart(2, "0")}`;
+  const rd = t.match(/^(?:rd|district)?\s*(\d{3,4})$/i);
+  if (rd) return rd[1].padStart(4, "0");
+  return extractZone(t) || t;
 }
