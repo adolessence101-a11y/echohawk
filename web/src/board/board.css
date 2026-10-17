@@ -88,7 +88,11 @@ svg.links line { stroke: var(--ask); stroke-width: 6; stroke-linecap: round; str
 .inctable .rt { font-size: 15px; font-weight: 500; display: flex; align-items: center; gap: 8px; flex-wrap: wrap } .inctable .rs { font-size: 13px; color: var(--muted); margin-top: 2px }
 .inctable .src { font-size: 15px; font-variant-numeric: tabular-nums } .inctable .chev { width: 40px; text-align: center }
 .mini { font-size: 10.5px; font-weight: 600; padding: 1px 7px; border-radius: 999px; border: 1px solid } .mini.spread { color: #ffd58a; border-color: rgba(242,180,60,.6) } .mini.flag { color: #9cc4ff; border-color: rgba(76,156,240,.6) } .mini.sent { color: var(--teal); border-color: rgba(60,199,180,.6) }
-.drawer { margin-top: auto; border-top: 1px solid var(--line2); background: #151f2e; padding: 14px 18px 16px; animation: tin .25s ease-out }
+.drawer { background: #151f2e; padding: 14px 18px 16px; animation: tin .25s ease-out }
+.inctable tr.exprow > td { padding: 0; border-bottom: 1px solid var(--line2); box-shadow: inset 3px 0 0 var(--teal); cursor: default }
+.inctable tr.exprow:hover { background: transparent }
+.inctable tr.on > td { border-bottom-color: transparent }
+.chevi { display: inline-flex; transition: transform .2s } .chevi.open { transform: rotate(90deg) }
 .drawer .dtop { display: flex; align-items: center; gap: 10px; flex-wrap: wrap } .drawer .dtop b { font-size: 16px }
 .drawer .x { background: transparent; border: 0; color: var(--muted) }
 .drawer .dstats { display: flex; gap: 14px; flex-wrap: wrap; font-size: 13px; color: var(--muted); margin-top: 8px } .drawer .dstats b { color: var(--text) }

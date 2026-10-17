@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { Fragment, useMemo, useRef, useState } from "react";
 import { api, token } from "../shared/api";
 import type { EventRow, Health, Incident, OpenCallback, Unit, ZoneWindow } from "../shared/types";
 import { useEvents, useRefresher } from "../shared/sse";
@@ -214,34 +214,38 @@ export function Board() {
             <thead><tr><Th k="priority">Priority</Th><Th k="district">District</Th><Th k="report">Report</Th><Th k="sources">Sources</Th><th /></tr></thead>
             <tbody>
               {rows.map((i) => {
-                const mo = isMachineOnly(i);
+                const mo = isMachineOnly(i), open = sel === i.id;
                 return (
-                  <tr key={i.id} className={sel === i.id ? "on" : ""} onClick={() => setSel(sel === i.id ? null : i.id)}>
+                  <Fragment key={i.id}>
+                  <tr className={open ? "on" : ""} onClick={() => setSel(open ? null : i.id)} aria-expanded={open}>
                     <td><span className={`prio ${mo ? "machine" : i.rung}`}>{mo ? "ALARM" : PRIO_LABEL[i.rung]}</span></td>
                     <td className="dist">{rdOf(i.zone_id)}</td>
                     <td><div className="rt">{tName(i.target)}{i.spread_linked_incident_id && <span className="mini spread">spreading</span>}{flagged.has(i.zone_id) && <span className="mini flag">unusual volume</span>}{(i.dispatched || []).length > 0 && <span className="mini sent">units sent</span>}</div><div className="rs">{reportLine(i)}</div></td>
                     <td className="src">{i.independent_count}{i.machine_count ? <span className="muted small"> +{i.machine_count} alarm</span> : null}</td>
-                    <td className="chev">{Icon.chevron("#8d9aae")}</td>
+                    <td className="chev" title={open ? "Hide details" : "Show details and send help"}><span className={`chevi ${open ? "open" : ""}`}>{Icon.chevron(open ? "#3cc7b4" : "#8d9aae")}</span></td>
                   </tr>
+                  {open && selInc && (
+                    <tr className="exprow"><td colSpan={5}>
+                      <div className="drawer">
+                  <div className="dtop"><span className="muted small">First report {ago(selInc.first_report_at)} ago{selInc.zone_id !== rdOf(selInc.zone_id) ? ` · demo zone ${selInc.zone_id}` : ""}</span></div>
+                  <div className="dstats"><span><b>{selInc.packet_ids.length}</b> calls → <b>1</b> line</span><span><b>{selInc.independent_count}</b> independent</span>{!!selInc.machine_count && <span><b>{selInc.machine_count}</b> machine</span>}<span>confidence* <b>{Number(selInc.score).toFixed(2)}</b>{selInc.trend === "rising" ? " ↑" : ""}</span></div>
+                  <div className="why">{closeErr[selInc.id] || (isMachineOnly(selInc) ? "Only alarm activations so far. Likely one cause (power or wind), not separate emergencies. Confirm one address first." : plainReason(selInc.last_reason))}</div>
+                  <div className="chips">{(selInc.triggers || []).map((t) => <span key={t} className="chip trig">heard: {trig(t)}</span>)}<UnitChips dispatched={selInc.dispatched} />{acked.has(selInc.id) && <span className="chip">seen by supervisor</span>}</div>
+                  <div className="dacts">
+                    <DeployBar withCallback={false} dispatched={selInc.dispatched} suggested={suggest(undefined, selInc.target)} onSend={(u) => deploy([selInc.id], u)} />
+                    <span className="spacer" />
+                    <button onClick={() => ack(selInc.id)} disabled={acked.has(selInc.id)}>{acked.has(selInc.id) ? "Seen" : "Mark seen"}</button>
+                    <button onClick={() => closeInc(selInc.id)}>Close</button>
+                  </div>
+                </div>
+                    </td></tr>
+                  )}
+                  </Fragment>
                 );
               })}
               {!inc.length && <tr><td colSpan={5}><div className="empty">All quiet. Press <b>Run demo surge</b> to play the 20-call stage script, or place a real call.</div></td></tr>}
             </tbody>
           </table>
-          {selInc && (
-            <div className="drawer">
-              <div className="dtop"><span className={`prio ${isMachineOnly(selInc) ? "machine" : selInc.rung}`}>{isMachineOnly(selInc) ? "ALARM" : PRIO_LABEL[selInc.rung]}</span><b>District {rdOf(selInc.zone_id)} · {tName(selInc.target)}</b><span className="muted small">first report {ago(selInc.first_report_at)} ago{selInc.zone_id !== rdOf(selInc.zone_id) ? ` · demo zone ${selInc.zone_id}` : ""}</span><span className="spacer" /><button className="x" onClick={() => setSel(null)}>✕</button></div>
-              <div className="dstats"><span><b>{selInc.packet_ids.length}</b> calls → <b>1</b> line</span><span><b>{selInc.independent_count}</b> independent</span>{!!selInc.machine_count && <span><b>{selInc.machine_count}</b> machine</span>}<span>confidence* <b>{Number(selInc.score).toFixed(2)}</b>{selInc.trend === "rising" ? " ↑" : ""}</span></div>
-              <div className="why">{closeErr[selInc.id] || (isMachineOnly(selInc) ? "Only alarm activations so far. Likely one cause (power or wind), not separate emergencies. Confirm one address first." : plainReason(selInc.last_reason))}</div>
-              <div className="chips">{(selInc.triggers || []).map((t) => <span key={t} className="chip trig">heard: {trig(t)}</span>)}<UnitChips dispatched={selInc.dispatched} />{acked.has(selInc.id) && <span className="chip">seen by supervisor</span>}</div>
-              <div className="dacts">
-                <DeployBar withCallback={false} dispatched={selInc.dispatched} suggested={suggest(undefined, selInc.target)} onSend={(u) => deploy([selInc.id], u)} />
-                <span className="spacer" />
-                <button onClick={() => ack(selInc.id)} disabled={acked.has(selInc.id)}>{acked.has(selInc.id) ? "Seen" : "Mark seen"}</button>
-                <button onClick={() => closeInc(selInc.id)}>Close</button>
-              </div>
-            </div>
-          )}
         </section>
 
         <section className="panel mappanel">
