@@ -10,6 +10,9 @@ import { loadAdjacency, loadBaselines } from "./seed.js";
 const store = new Store("data/db.json");
 const engine = new Engine(store, { adjacency: loadAdjacency() });
 if (store.baselines.length === 0) loadBaselines(store);
+// a restart drops every websocket, so any call still marked open was cut off: close it so it stops showing as live
+for (const c of store.calls) if (!c.ended_at) { c.ended_at = new Date().toISOString(); if (c.status === "active") c.status = "ended"; c.end_reason = "server_restart"; }
+store.save();
 const hub = new RetellHub({ store, engine });
 const server = createHttpServer({ store, engine, hub });
 hub.attach(server);
