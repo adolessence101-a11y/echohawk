@@ -114,3 +114,18 @@ test("A15 (server side): 16-byte frame signs, decodes, and rejects replay", () =
   assert.equal(decodeFrame(tampered, key, new ReplayWindow()).error, "signature invalid");
   assert.equal(decodeFrame(f, "wrong", new ReplayWindow()).error, "signature invalid");
 });
+
+test("streaming transcript: growing turns are updated, not frozen at the first fragment", () => withServer(async (ctx) => {
+  const ws = ctx.connect("call_stream"); await ws.ready; await once(ws, (m) => m.response_type === "config");
+  ws.send(JSON.stringify({ interaction_type: "update_only", transcript: [{ role: "user", content: "Zone" }] }));
+  ws.send(JSON.stringify({ interaction_type: "update_only", transcript: [{ role: "user", content: "Zone six, our water" }] }));
+  const full = [{ role: "user", content: "Zone six, our water pressure dropped to nothing, no one is hurt." }];
+  ws.send(JSON.stringify({ interaction_type: "response_required", response_id: 1, transcript: full }));
+  const resp = await once(ws, (m) => m.response_type === "response");
+  const turns = ctx.store.turns.filter((t) => t.call_id === "call_stream");
+  assert.equal(turns.length, 1);
+  assert.equal(turns[0].text_original, full[0].content);
+  assert.equal(ctx.store.packets[0].zone_id, "Z06");
+  assert.equal(ctx.store.packets[0].target, "water");
+  assert.match(resp.content, /zone 6/i);
+}));

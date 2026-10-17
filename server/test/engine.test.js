@@ -114,3 +114,14 @@ test("street addresses are rejected as zone ids", () => {
   const { errors } = makePacket({ source: "app", zone_id: "1234 Main St", target: "power", identifier: "a" });
   assert.ok(errors.some((e) => /street address/.test(e)));
 });
+
+test("spoken zone numbers from speech-to-text map to zone ids", async () => {
+  const { extractZone } = await import("../llm.js");
+  assert.equal(extractZone("zone six, water pressure gone"), "Z06");
+  assert.equal(extractZone("Zone zero six"), "Z06");
+  assert.equal(extractZone("zona seis, sin luz"), "Z06");
+  assert.equal(extractZone("Zone three o six. Our water pressure dropped."), "0306");
+  assert.equal(extractZone("RD 0802 structure fire"), "0802");
+  assert.equal(extractZone("Zona Z04."), "Z04");
+  assert.equal(extractZone("no zone here"), null);
+});

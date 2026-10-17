@@ -49,15 +49,34 @@ export class RetellHub {
   }
 
   absorbTranscript(s, transcript = []) {
-    // transcript is the full transcript so far; persist only new turns
-    const known = s.transcript.length;
-    const fresh = (transcript || []).slice(known);
-    for (const t of fresh) {
+    // Retell sends the FULL transcript every time, and the last turn keeps growing while the person is still talking.
+    // So: update turns we already have when their text changed, append the ones we don't have yet.
+    const list = transcript || [];
+    const fresh = [];
+    for (let i = 0; i < list.length; i++) {
+      const t = list[i];
+      const known = s.transcript[i];
+      if (known) {
+        if (known.content !== t.content) {
+          known.content = t.content;
+          const row = this.store.turns.find((x) => x.call_id === s.callId && x.idx === i);
+          if (row) { row.text_original = t.content; row.ts_updated = new Date().toISOString(); }
+          this.store.appendEvent({ event_type: "turn_updated", call_id: s.callId, actor: t.role === "agent" ? "ai" : "device", provenance: "firsthand", payload_json: { idx: i, role: t.role, text: t.content } });
+        }
+        continue;
+      }
       s.transcript.push({ role: t.role, content: t.content });
-      this.store.turns.push({ id: this.store.nextId("tn"), call_id: s.callId, idx: s.transcript.length - 1, role: t.role, text_original: t.content, text_translated: null, lang_original: s.callerLang, ts: new Date().toISOString() });
+      fresh.push(t);
+      this.store.turns.push({ id: this.store.nextId("tn"), call_id: s.callId, idx: i, role: t.role, text_original: t.content, text_translated: null, lang_original: s.callerLang, ts: new Date().toISOString() });
       this.store.appendEvent({ event_type: "turn_added", call_id: s.callId, actor: t.role === "agent" ? "ai" : "device", provenance: "firsthand", payload_json: { role: t.role, text: t.content } });
-      if (s.dispatcherJoined && t.role === "user") {
-        translate(t.content, "en", s.callerLang).then((tr) => { const row = this.store.turns.filter((x) => x.call_id === s.callId).at(-1); if (row) row.text_translated = tr; this.store.appendEvent({ event_type: "turn_translated", call_id: s.callId, actor: "system", provenance: "firsthand", payload_json: { role: "user", text: tr } }); });
+    }
+    // translate finished user turns for a joined dispatcher (on every response_required, the user turn is complete)
+    if (s.dispatcherJoined) {
+      const lastUserIdx = s.transcript.map((t) => t.role).lastIndexOf("user");
+      const row = this.store.turns.find((x) => x.call_id === s.callId && x.idx === lastUserIdx);
+      if (row && row.translated_from !== row.text_original) {
+        const src = row.text_original; row.translated_from = src;
+        translate(src, "en", s.callerLang).then((tr) => { row.text_translated = tr; this.store.appendEvent({ event_type: "turn_translated", call_id: s.callId, actor: "system", provenance: "firsthand", payload_json: { role: "user", text: tr } }); });
       }
     }
     return fresh;
@@ -99,7 +118,7 @@ export class RetellHub {
     const kitId = kitForFields(s.fields, triggers);
     if (kitId && !s.kitShown) { const shown = showKitCard({ kit_id: kitId, zone_id: s.fields?.zone_id, call_id: s.callId, language: s.callerLang }, this.store, "ai"); if (shown.ok) { s.kitShown = kitId; kitScript = shown.script_lines; this.send(s.ws, { response_type: "metadata", metadata: { show_kit_card: shown } }); } }
 
-    const content = await agentReply(s.transcript, { fields: s.fields, kitScript, mode: "tuesday", language: s.callerLang });
+    const content = await agentReply(s.transcript, { fields: s.fields, kitScript, mode: "tuesday", language: s.callerLang, reminder });
     this.send(s.ws, { response_type: "response", response_id: msg.response_id, content, content_complete: true });
   }
 
