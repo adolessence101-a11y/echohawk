@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import { dirname, join, extname } from "node:path";
 import { config } from "./config.js";
 import { makePacket } from "./schema.js";
+import { scheduleCallback, recordCallback, openCallbacks } from "./callbacks.js";
 import { catalog, getKit, showKitCard } from "./kits.js";
 import { scanTurn } from "./triggers.js";
 import { encodeFrame, toBase64, TARGET_CODES, ACTION_CODES, LANG_CODES } from "../device/frame.js";
@@ -81,7 +82,10 @@ export function createHttpServer({ store, engine, hub }) {
       if (path.startsWith("/incidents/") && method === "GET") { const id = path.split("/")[2]; const inc = store.incidents.find((i) => i.id === id); if (!inc) return json(res, 404, { error: "not found" }); return json(res, 200, { ...inc, keys: undefined, packets: store.packets.filter((p) => p.incident_id === id), events: store.events.filter((e) => e.incident_id === id) }); }
       if (path.match(/^\/incidents\/[^/]+\/ack$/) && method === "POST") { const id = path.split("/")[2]; const r = role(req); if (r === "anon") return json(res, 401, { error: "token" }); store.appendEvent({ event_type: "acknowledged_by_human", incident_id: id, actor: r, provenance: "firsthand", payload_json: {} }); return json(res, 200, { ok: true }); }
       if (path.match(/^\/incidents\/[^/]+\/close$/) && method === "POST") { const id = path.split("/")[2]; const r = role(req); if (r === "anon") return json(res, 401, { error: "token" }); const body = JSON.parse((await readBody(req)).toString() || "{}"); const out = engine.close(id, r, body.reason || ""); return json(res, out.ok ? 200 : out.status, out); }
+      if (path.match(/^\/incidents\/[^/]+\/callback$/) && method === "POST") { const id = path.split("/")[2]; const body = JSON.parse((await readBody(req)).toString() || "{}"); const row = scheduleCallback(store, id, Number(body.attempt_no) || 1); return json(res, 201, row); }
       if (path === "/zones/windows" && method === "GET") return json(res, 200, store.zoneWindows.slice(-2000));
+      if (path.match(/^\/callbacks\/[^/]+\/result$/) && method === "POST") { const id = path.split("/")[2]; const body = JSON.parse((await readBody(req)).toString() || "{}"); const out = recordCallback(store, id, body.result); return json(res, out.ok ? 200 : out.status, out); }
+      if (path === "/callbacks/open" && method === "GET") return json(res, 200, openCallbacks(store));
 
       // ---- calls, transcripts, interpreter mode ----
       if (path === "/calls" && method === "GET") { const active = url.searchParams.get("status") === "active"; const calls = store.calls.filter((c) => !active || c.status === "active" || c.status === "transferred").map((c) => { const pk = store.packets.find((p) => p.call_id === c.id); return { ...c, target: pk?.target, severity: pk?.severity, zone_id: pk?.zone_id, rung: pk?.incident_id ? store.incidents.find((i) => i.id === pk.incident_id)?.rung : null, elapsed_s: Math.round((Date.now() - new Date(c.started_at)) / 1000) }; }); return json(res, 200, calls); }
