@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Logo } from "../shared/Brand";
 import { LANGUAGES, langName } from "../shared/languages";
 import { rdOf } from "../shared/laMap";
-import { chirp, listen, signFrame, speak, verifyFrame, type Verified } from "./frame";
+import { chirp, listen, signFrame, speak, verifyFrame, readAck, sendBle, bleAvailable, ACK_LABEL, type Verified } from "./frame";
 
 // ---------- device storage (try/catch: private mode and some webviews throw) ----------
 const S = <T,>(k: string, v?: T): T | null => { try { if (v !== undefined) localStorage.setItem(k, JSON.stringify(v)); const r = localStorage.getItem(k); return r ? JSON.parse(r) : null; } catch { return v ?? null; } };
@@ -225,20 +225,47 @@ function Kits({ me }: { me: Me }) {
 
 function Beacon({ me }: { me: Me }) {
   const [on, setOn] = useState(false), [log, setLog] = useState("");
-  const timer = useRef<ReturnType<typeof setInterval> | null>(null), seq = useRef(Math.floor(Math.random() * 60000));
-  const toggle = async () => {
-    if (timer.current) { clearInterval(timer.current); timer.current = null; setOn(false); setLog("Stopped."); return; }
-    const zone = parseInt(serverZone(me.zone || "0").replace(/\D/g, ""), 10) || 0;
-    const tick = async () => { seq.current = (seq.current + 1) & 0xffff; const f = await signFrame({ type: "sos", zone, target: "person", severity: 5, action: "dispatch_ems", language: me.lang, sequence: seq.current }); await chirp(f); setLog(`SOS #${seq.current} sent ${new Date().toLocaleTimeString()}`); };
-    try { await tick(); timer.current = setInterval(tick, 4000); setOn(true); } catch (e) { setLog(`Could not start: ${(e as Error).message}`); }
+  const [stages, setStages] = useState<{ stage: number; node: number; how: string; at: string }[]>([]);
+  const timer = useRef<ReturnType<typeof setInterval> | null>(null), stopListen = useRef<(() => void) | null>(null), ble = useRef<{ close: () => void } | null>(null);
+  // one emergency keeps one sequence, so every node and every repeat is recognized as the same report
+  const seq = useRef(Math.floor(Math.random() * 60000));
+  const zone = () => parseInt(serverZone(me.zone || "0").replace(/\D/g, ""), 10) || 0;
+  const sos = () => signFrame({ type: "sos", zone: zone(), target: "person", severity: 5, action: "dispatch_ems", language: me.lang, sequence: seq.current });
+  const gotReceipt = async (bytes: Uint8Array, how: string) => {
+    const r = await readAck(bytes, seq.current); if (!r) return;
+    setStages((xs) => xs.some((x) => x.stage === r.stage) ? xs : [...xs, { ...r, how, at: new Date().toLocaleTimeString() }].sort((a, b) => a.stage - b.stage));
+    if (navigator.vibrate) navigator.vibrate(r.stage === 1 ? [120] : [120, 80, 120]);
+    // picked up: stop chirping, keep listening for the dispatch receipt
+    if (timer.current) { clearInterval(timer.current); timer.current = null; setLog("Picked up. Stopped repeating, still listening for dispatch."); }
   };
-  useEffect(() => () => { if (timer.current) clearInterval(timer.current); }, []);
+  const stopAll = () => { if (timer.current) clearInterval(timer.current); timer.current = null; stopListen.current?.(); stopListen.current = null; ble.current?.close(); ble.current = null; setOn(false); };
+  const toggle = async () => {
+    if (on) { stopAll(); setLog("Stopped."); return; }
+    seq.current = (seq.current + 1) & 0xffff; setStages([]);
+    try {
+      stopListen.current = await listen((b) => gotReceipt(b, "sound"));
+      const tick = async () => { await chirp(await sos()); setLog(`SOS sent ${new Date().toLocaleTimeString()}, listening for a node…`); };
+      await tick(); timer.current = setInterval(tick, 6000); setOn(true);
+    } catch (e) { setLog(`Could not start: ${(e as Error).message}`); }
+  };
+  const viaBle = async () => {
+    seq.current = (seq.current + 1) & 0xffff; setStages([]);
+    try { ble.current = await sendBle(await sos(), (b) => gotReceipt(b, "Bluetooth")); setOn(true); setLog("SOS sent by Bluetooth, waiting for the node…"); }
+    catch (e) { setLog(`Bluetooth: ${(e as Error).message}`); }
+  };
+  useEffect(() => () => stopAll(), []); // eslint-disable-line react-hooks/exhaustive-deps
   return (
     <>
       <h1 className="ph-h">Beacon</h1>
-      <p className="ph-sub">Repeats a short SOS chirp every few seconds for an eHawk or a rescuer's phone nearby. Arm's reach only: for dark rooms and rubble, not for reaching the city.</p>
-      <button className={`ph-beacon ${on ? "on" : ""}`} onClick={toggle}>{on ? "Stop beacon" : "Start beacon"}</button>
+      <p className="ph-sub">Sends a signed SOS to the nearest EchoHawk node with no cell signal: by sound (arm's reach) or by Bluetooth. You get a receipt when a node picks it up and another when dispatch has it.</p>
+      <button className={`ph-beacon ${on ? "on" : ""}`} onClick={toggle}>{on ? "Stop" : "Start sound beacon"}</button>
+      {bleAvailable() ? <button className="ph-ble" onClick={viaBle}>Send by Bluetooth to a node</button> : <div className="ph-status center small">Bluetooth sending needs Chrome on Android or a laptop. iPhone browsers don't allow it.</div>}
       {log && <div className="ph-status center">{log}</div>}
+      <div className="ph-receipts">
+        {[1, 2].map((st) => { const r = stages.find((x) => x.stage === st); return (
+          <div key={st} className={`ph-rc ${r ? "ok" : ""}`}><span className="dot" /><div><b>{ACK_LABEL[st]}</b><span>{r ? `${st === 1 ? `Node ${r.node}` : "Dispatch"} · by ${r.how} · ${r.at}` : "Waiting"}</span></div></div>
+        ); })}
+      </div>
     </>
   );
 }

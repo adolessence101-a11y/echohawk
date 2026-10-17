@@ -5,7 +5,7 @@ export const FEED_COLOR: Record<string, string> = {
   packet_created: "var(--watch)", incident_opened: "var(--watch)", rung_changed: "var(--hand)", trigger_fired: "var(--hand)", incident_spread: "var(--ask)",
   scan_flagged: "var(--ask)", units_dispatched: "var(--ok)", call_flagged: "var(--machine)", transfer_started: "var(--ok)", kit_shown: "var(--muted)",
   callback_no_answer: "var(--ask)", dispatcher_joined: "var(--ok)", dispatcher_said: "var(--muted)",
-  unit_status: "var(--teal)", incident_disposition: "var(--muted)",
+  unit_status: "var(--teal)", incident_disposition: "var(--muted)", report_picked_up: "var(--hand)", relay_heard: "var(--muted)",
   alert_sent: "var(--ask)", alert_requested: "var(--ask)", alert_cancelled: "var(--muted)", alert_ack: "var(--ok)",
 };
 export const FEED_TYPES = new Set(Object.keys(FEED_COLOR));
@@ -16,6 +16,8 @@ export function feedLine(ev: EventRow, byId: Record<string, Incident>): { where:
   const where = String(p.zone_id || i?.zone_id || "");
   const t = p.target || i?.target;
   switch (ev.event_type) {
+    case "report_picked_up": return { where: where || "no zone", text: `eHawk SOS picked up by ${p.node_id} over ${p.channel === "ble" ? "Bluetooth" : p.channel}, receipt sent back` };
+    case "relay_heard": return { where: where || "", text: `same report also heard by ${p.node_id} (${p.channel === "ble" ? "Bluetooth" : p.channel}), counted once` };
     case "packet_created": return { where: where || "no zone", text: p.source === "telemetry" ? "alarm activation (machine)" : p.content_status === "none" ? "call with no usable details (counted for volume only)" : `${tName(t)} · new AI call` };
     case "incident_opened": return { where, text: `new line: ${tName(t)}` };
     case "rung_changed": return { where, text: `${tName(t)} moved to ${RUNG_LABEL[p.to as keyof typeof RUNG_LABEL] || p.to} (${plainReason(p.reason)})` };

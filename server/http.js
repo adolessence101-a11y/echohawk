@@ -17,7 +17,7 @@ import { Broadcasts, AGENCIES, KINDS } from "./broadcasts.js";
 import { LANGUAGES } from "./languages.js";
 import { initUnit, setUnitStatus, unitBoard, closeWithDisposition, updatesForDevice, addStop, DISPOSITIONS, WATCHDOG_S } from "./units.js";
 import { triageSelfReport } from "./triage.js";
-import { recordHearing, rememberFirst, zoneOfNode, DEMO_NODES } from "./relay.js";
+import { recordHearing, rememberFirst, zoneOfNode, readFrame, ackFrame, DEMO_NODES } from "./relay.js";
 import { researchRows, toCsv } from "./research.js";
 import { translate } from "./llm.js";
 
@@ -76,17 +76,26 @@ export function createHttpServer({ store, engine, hub }) {
 
       // one chirp heard by several nodes counts once; which nodes heard it narrows where it came from (relay.js)
       const devicePacket = (body) => {
+        // a raw signed frame from a node: check the signature before anything else
+        let frame = null;
+        if (body.frame_b64) { frame = readFrame(body.frame_b64, config.frameKey); if (!frame.ok) { store.appendEvent({ event_type: "frame_rejected", actor: "device", provenance: "forwarded", payload_json: { node_id: String(body.node_id || ""), error: frame.error } }); return { status: 400, body: { error: frame.error } }; } }
+        // the receipt the node passes back to the sender: "delivered to dispatch", signed, same sequence as the report
+        const receipt = frame && body.node_id ? toBase64(ackFrame({ stage: "delivered", sequence: frame.sequence, node: String(body.node_id), language: frame.language }, config.frameKey)) : null;
         const hearing = recordHearing(store, body);
-        if (hearing.duplicate) return { status: 200, body: { duplicate: true, packet_id: hearing.packet?.packet_id || null, incident_id: hearing.packet?.incident_id || null, heard_by: hearing.heard_by, approx_area: hearing.packet?.approx_area || null } };
-        const zone = body.zone_id || zoneOfNode(hearing.node) || undefined;
-        const { packet, errors } = makePacket({ ...body, zone_id: zone, source: body.source || "ehawk", provenance: body.provenance || "forwarded" });
+        if (hearing.duplicate) return { status: 200, body: { duplicate: true, packet_id: hearing.packet?.packet_id || null, incident_id: hearing.packet?.incident_id || null, heard_by: hearing.heard_by, approx_area: hearing.packet?.approx_area || null, picked_up: hearing.packet?.picked_up || null, ack_b64: receipt } };
+        const input = frame ? { ...frame.fields, ...body, ...frame.fields } : body;
+        const zone = input.zone_id || zoneOfNode(hearing.node) || undefined;
+        const { packet, errors } = makePacket({ ...input, zone_id: zone, source: body.source || "ehawk", provenance: body.provenance || "forwarded" });
         if (errors.length) return { status: 400, body: { errors } };
-        const triggers = body.text ? scanTurn(body.text) : { hard: [], soft: [] };
+        const triggers = input.text ? scanTurn(input.text) : { hard: [], soft: [] };
+        if (frame?.type === "sos") triggers.hard = [...new Set([...triggers.hard, "sos_beacon"])]; // a beacon means someone cannot call: always a person
         triageSelfReport(packet, triggers);
         packet.packet_id ||= store.nextId("pk");
-        rememberFirst(store, hearing.key, hearing.node, packet);
+        rememberFirst(store, hearing.key, hearing.node, packet, Date.now(), hearing.channel);
+        if (frame) { packet.frame_type = frame.type; packet.frame_sequence = frame.sequence; packet.delivered_at = new Date().toISOString(); }
         const out = engine.ingest(packet, { triggers });
-        return { status: 201, body: { packet_id: packet.packet_id, incident_id: out.incident?.id || null, rung: out.rung, severity: packet.severity, triage_note: packet.triage_note || null, heard_by: packet.heard_by || [], approx_area: packet.approx_area || null } };
+        if (frame && hearing.node) store.appendEvent({ event_type: "report_picked_up", packet_id: packet.packet_id, incident_id: out.incident?.id || null, actor: "device", provenance: "forwarded", payload_json: { node_id: hearing.node, channel: hearing.channel, sequence: frame.sequence, zone_id: packet.zone_id } });
+        return { status: 201, body: { packet_id: packet.packet_id, incident_id: out.incident?.id || null, rung: out.rung, severity: packet.severity, triage_note: packet.triage_note || null, heard_by: packet.heard_by || [], approx_area: packet.approx_area || null, picked_up: packet.picked_up || null, ack_b64: receipt } };
       };
       // reset the live demo: clears calls, reports, incidents, units, alerts and the event log; keeps baselines, kits,
       // the twist log and the district map. Supervisor only. Pages listening on the stream reload themselves.
@@ -218,7 +227,7 @@ export function createHttpServer({ store, engine, hub }) {
       // ---- static UIs ----
       // React screens (web/dist, built by `npm run build:web`) take over when present; the plain pages stay at /legacy/*.
       const built = (name) => existsSync(join(root, `web/dist/${name}/index.html`)) ? `/web/dist/${name}/index.html` : `/${name}/index.html`;
-      const map = { "/": built("board"), "/board": built("board"), "/console": built("console"), "/replay": built("replay"), "/alerts": built("alerts"), "/app": built("app"), "/app/": built("app"), "/app/index.html": built("app"), "/app/legacy": "/app/index.html", "/chirp": "/device/chirp_send.html",
+      const map = { "/": built("board"), "/board": built("board"), "/console": built("console"), "/replay": built("replay"), "/alerts": built("alerts"), "/node": built("node"), "/app": built("app"), "/app/": built("app"), "/app/index.html": built("app"), "/app/legacy": "/app/index.html", "/chirp": "/device/chirp_send.html",
         "/legacy/board": "/board/index.html", "/legacy/console": "/console/index.html", "/legacy/replay": "/replay/index.html" };
       let file = map[path] || (path.startsWith("/assets/") ? "/web/dist" + path : path);
       const full = join(root, file);

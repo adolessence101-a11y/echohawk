@@ -52,3 +52,12 @@ button { font: inherit; cursor: pointer; color: inherit }
 .ph-update .pu-dot { width: 10px; height: 10px; border-radius: 50%; background: #23b26b; margin-top: 6px; flex: none; animation: pulse 1.6s infinite }
 .ph-update b { display: block; font-size: 15px } .ph-update span { display: block; font-size: 16px; margin-top: 2px } .ph-update small { display: block; color: var(--mute); margin-top: 4px; text-transform: capitalize }
 .ph-update.done { border-color: var(--line); background: #fafafa } .ph-update.done .pu-dot { background: #9aa1ab; animation: none }
+
+/* beacon receipts: picked up by a node, delivered to dispatch */
+.ph-ble { display: block; width: 100%; margin-top: 10px; padding: 12px; border-radius: 12px; border: 1.5px solid #c2353a; background: #fff; color: #c2353a; font-weight: 600; font-size: 15px; }
+.ph-receipts { display: grid; gap: 8px; margin-top: 16px; }
+.ph-rc { display: flex; gap: 10px; align-items: center; padding: 10px 12px; border-radius: 12px; background: #f4f2ee; color: #6b7280; }
+.ph-rc .dot { width: 12px; height: 12px; border-radius: 50%; background: #d1cdc4; flex: none; }
+.ph-rc b { display: block; color: #1f2937; font-size: 14px; } .ph-rc span { font-size: 12.5px; }
+.ph-rc.ok { background: #e9f8f4; } .ph-rc.ok .dot { background: #1a9d7c; }
+.ph-status.small { font-size: 12px; margin-top: 8px; }

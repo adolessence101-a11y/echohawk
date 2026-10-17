@@ -194,6 +194,7 @@ export function Board() {
   const surge = async () => { setSurging(true); await api.surge().catch(() => false); setTimeout(() => setSurging(false), 5000); };
   const armSound = () => { if (!audio) { try { audio = new (window.AudioContext || (window as any).webkitAudioContext)(); setSoundOn(true); } catch { /* no audio */ } } };
   const sortBy = (k: SortKey) => setSort((s) => ({ k, dir: s.k === k ? (s.dir === 1 ? -1 : 1) : 1 }));
+  const CH: Record<string, string> = { ble: "Bluetooth", sound: "sound", radio: "radio", wifi: "Wi-Fi" };
   const Th = ({ k, children }: { k: SortKey; children: string }) => <th onClick={() => sortBy(k)} className="sortable">{children} <span className={`sorti ${sort.k === k ? "on" : ""}`}>{sort.k === k && sort.dir === -1 ? "▾" : "▴"}</span></th>;
 
   return (
@@ -273,7 +274,7 @@ export function Board() {
                   <div className="dtop"><span className="muted small">First report {ago(selInc.first_report_at)} ago{selInc.zone_id !== rdOf(selInc.zone_id) ? ` · demo zone ${selInc.zone_id}` : ""}</span></div>
                   <div className="dstats"><span><b>{selInc.packet_ids.length}</b> calls → <b>1</b> line</span><span><b>{selInc.independent_count}</b> independent</span>{!!selInc.machine_count && <span><b>{selInc.machine_count}</b> machine</span>}<span>confidence* <b>{Number(selInc.score).toFixed(2)}</b>{selInc.trend === "rising" ? " ↑" : ""}</span></div>
                   <div className="why">{closeErr[selInc.id] || (isMachineOnly(selInc) ? "Only alarm activations so far. Likely one cause (power or wind), not separate emergencies. Confirm one address first." : plainReason(selInc.last_reason))}</div>
-                  {!!selInc.heard_by?.length && <div className="relayline">📡 One chirp, heard by {selInc.heard_by.length} node{selInc.heard_by.length > 1 ? "s" : ""} ({selInc.heard_by.join(", ")}), counted once.{selInc.approx_area ? ` Came from within about ${selInc.approx_area.radius_m} m of those poles (circle on the map). Simulated nodes.` : ""}</div>}
+                  {!!selInc.heard_by?.length && <div className="relayline">📡 {selInc.picked_up ? `Picked up by ${selInc.picked_up.node} over ${CH[selInc.picked_up.channel] || selInc.picked_up.channel} at ${hms(selInc.picked_up.at)}${selInc.delivered_at ? ", receipt sent back to the sender" : ""}. ` : ""}Heard by {selInc.heard_by.length} node{selInc.heard_by.length > 1 ? "s" : ""} ({selInc.heard_by.join(", ")}), counted once.{selInc.approx_area ? ` Came from within about ${selInc.approx_area.radius_m} m of those poles (circle on the map). Simulated node positions.` : ""}</div>}
                   {!!selInc.self_reported_held && <div className="relayline held">⚖ {selInc.triage_note}. The app cannot set its own priority.</div>}
                   <div className="chips">{(selInc.triggers || []).map((t) => <span key={t} className="chip trig">heard: {trig(t)}</span>)}{acked.has(selInc.id) && <span className="chip">seen by supervisor</span>}</div>
                   {(selInc.dispatched || []).length > 0 && <div className="units">{(selInc.dispatched || []).map((d, n) => <UnitPill key={n} d={d} n={n} limit={watchdog[d.status || "assigned"]} onSet={(k, st) => setUnit(selInc.id, k, st)} />)}</div>}

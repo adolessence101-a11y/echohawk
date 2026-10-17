@@ -27,6 +27,41 @@ export async function verifyFrame(bytes: Uint8Array): Promise<Verified> {
   return { ok: true, type: TYPES[bytes[0] & 0x0f], zone: (bytes[1] << 8) | bytes[2], target: TARGET_CODES[bytes[3] >> 4] || "unknown", severity: bytes[3] & 0x0f, action: ACTION_CODES[bytes[4] >> 4] || "unknown", language: LANG_CODES[bytes[4] & 0x0f] || "en", issuedAt: new Date(EPOCH_MS + mins * 60000).toISOString(), sequence: seq };
 }
 
+// a "picked up" or "delivered" receipt for a report this phone sent: signed ack frame, same sequence as the report.
+// Stage: 1 picked up by a node, 2 delivered to dispatch, 3 unit assigned. Zone field carries the node number.
+export const ACK_LABEL: Record<number, string> = { 1: "Picked up by a node", 2: "Delivered to dispatch", 3: "A unit is assigned" };
+export async function readAck(bytes: Uint8Array, sequence: number): Promise<{ stage: number; node: number } | null> {
+  if (bytes.length !== 16 || (bytes[0] & 0x0f) !== 3) return null;
+  const mac = await hmac(bytes);
+  if (!mac.every((b, i) => b === bytes[11 + i])) return null;
+  if (((bytes[9] << 8) | bytes[10]) !== sequence) return null;
+  return { stage: bytes[3] & 0x0f, node: (bytes[1] << 8) | bytes[2] };
+}
+
+// a node's own receipt (stage 1, picked up) signed on the spot, before any network
+export const signAck = (a: { stage: number; sequence: number; node: number; language?: string }) =>
+  signFrame({ type: "ack", zone: a.node, target: "unknown", severity: a.stage, action: "unknown", language: a.language || "en", sequence: a.sequence });
+export const b64 = (b: Uint8Array) => btoa(String.fromCharCode(...b));
+export const unb64 = (s: string) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
+export const NUS_UUIDS = { service: "6e400001-b5a3-f393-e0a9-e50e24dcca9e", rx: "6e400002-b5a3-f393-e0a9-e50e24dcca9e", tx: "6e400003-b5a3-f393-e0a9-e50e24dcca9e" };
+
+// Bluetooth to an EchoHawk node (ESP32) using the Nordic UART service: write the 16-byte frame, receipts come back as
+// notifications. Web Bluetooth works in Chrome on Android, Mac, Windows and ChromeOS; not in Safari or on iPhone.
+const NUS = "6e400001-b5a3-f393-e0a9-e50e24dcca9e", NUS_RX = "6e400002-b5a3-f393-e0a9-e50e24dcca9e", NUS_TX = "6e400003-b5a3-f393-e0a9-e50e24dcca9e";
+export const bleAvailable = () => typeof navigator !== "undefined" && "bluetooth" in navigator;
+export async function sendBle(frame: Uint8Array, onReceipt: (bytes: Uint8Array) => void): Promise<{ name: string; close: () => void }> {
+  const bt = (navigator as any).bluetooth;
+  const device = await bt.requestDevice({ filters: [{ namePrefix: "EchoHawk" }], optionalServices: [NUS] });
+  const server = await device.gatt.connect();
+  const svc = await server.getPrimaryService(NUS);
+  const tx = await svc.getCharacteristic(NUS_TX);
+  await tx.startNotifications();
+  tx.addEventListener("characteristicvaluechanged", (e: any) => onReceipt(new Uint8Array(e.target.value.buffer)));
+  const rx = await svc.getCharacteristic(NUS_RX);
+  await rx.writeValue(frame);
+  return { name: device.name || "EchoHawk node", close: () => { try { device.gatt.disconnect(); } catch { /* gone */ } } };
+}
+
 export async function signFrame(f: { type: string; zone: number; target: string; severity: number; action: string; language: string; sequence: number }) {
   const b = new Uint8Array(16);
   b[0] = (1 << 4) | TYPES.indexOf(f.type); b[1] = f.zone >> 8; b[2] = f.zone & 0xff;

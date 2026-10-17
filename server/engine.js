@@ -120,7 +120,7 @@ export class Engine {
     const ps = this.store.packets.filter((p) => p.incident_id === inc.id);
     const withNodes = ps.filter((p) => (p.heard_by || []).length).sort((a, b) => b.heard_by.length - a.heard_by.length)[0];
     const held = ps.filter((p) => p.reported_severity);
-    return { heard_by: withNodes?.heard_by || [], approx_area: withNodes?.approx_area || null, self_reported_held: held.length, triage_note: held[0]?.triage_note || null };
+    return { heard_by: withNodes?.heard_by || [], hearings: withNodes?.hearings || [], picked_up: withNodes?.picked_up || null, delivered_at: withNodes?.delivered_at || null, approx_area: withNodes?.approx_area || null, self_reported_held: held.length, triage_note: held[0]?.triage_note || null };
   }
   _trend(inc) {
     const ps = this.store.packets.filter((p) => p.incident_id === inc.id).map((p) => new Date(p.received_at).getTime()).sort();

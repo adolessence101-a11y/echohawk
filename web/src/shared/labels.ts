@@ -11,7 +11,7 @@ export const tIcon = (t?: string) => (TARGET[t || "unknown"] || TARGET.unknown)[
 export const tName = (t?: string) => (TARGET[t || "unknown"] || [null, String(t || "unknown").replace(/_/g, " ")])[1] as string;
 
 export const TRIG: Record<string, string> = {
-  asks_for_human: "asked for a person", breathing_qualified: "trouble breathing", dependent_alone: "child or dependent alone", distress: "caller in distress",
+  asks_for_human: "asked for a person", sos_beacon: "SOS beacon (cannot call)", breathing_qualified: "trouble breathing", dependent_alone: "child or dependent alone", distress: "caller in distress",
   electrical: "live electrical hazard", gas_or_pressure: "gas or pressure hazard", insists_higher_severity: "says it is worse", self_harm: "self harm risk",
   severe_bleeding: "severe bleeding", third_party_vulnerable: "vulnerable person", trapped: "someone trapped", unconscious: "unconscious", violence: "violence",
 };

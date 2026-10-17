@@ -27,6 +27,9 @@ export interface Incident {
   packet_ids: string[];
   dispatched?: Dispatched[];
   heard_by?: string[];
+  hearings?: { node: string; channel: string; at: string }[];
+  picked_up?: { node: string; channel: string; at: string } | null;
+  delivered_at?: string | null;
   approx_area?: ApproxArea | null;
   self_reported_held?: number;
   triage_note?: string | null;

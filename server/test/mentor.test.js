@@ -131,3 +131,31 @@ test("reset demo clears live data for a supervisor only and keeps baselines", as
     assert.deepEqual(store.events.map((e) => e.event_type), ["demo_reset"]);
   } finally { server.closeAllConnections?.(); server.close(); }
 });
+
+test("a signed SOS chirp heard by a node is picked up, lands as needs-a-person, and gets a signed receipt back", async () => {
+  const { createHttpServer } = await import("../http.js");
+  const { encodeFrame, decodeFrame, toBase64, fromBase64, ReplayWindow } = await import("../../device/frame.js");
+  const { config } = await import("../config.js");
+  const store = new Store(); const engine = new Engine(store, { adjacency: {} });
+  const hub = { sessions: new Map(), mode: () => "tuesday", attach() {} };
+  const server = createHttpServer({ store, engine, hub }); await new Promise((r) => server.listen(0, r));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const post = (body) => fetch(`${base}/device/packets`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+  try {
+    const sos = toBase64(encodeFrame({ type: "sos", zone: 6, target: "person", severity: 5, action: "dispatch_ems", language: "es", sequence: 4242 }, config.frameKey));
+    const first = await (await post({ node_id: "N-0812-A", channel: "ble", frame_b64: sos })).json();
+    assert.equal(first.picked_up.node, "N-0812-A"); assert.equal(first.picked_up.channel, "ble");
+    assert.equal(first.rung, "hand");
+    const ack = decodeFrame(fromBase64(first.ack_b64), config.frameKey, new ReplayWindow());
+    assert.equal(ack.type, "ack"); assert.equal(ack.sequence, 4242); assert.equal(ack.severity, 2); assert.equal(ack.zone, 1);
+    // the beacon repeats a minute later, heard by sound at another node: still one report, and still a receipt
+    const again = toBase64(encodeFrame({ type: "sos", zone: 6, target: "person", severity: 5, action: "dispatch_ems", language: "es", sequence: 4242, issuedAtMs: Date.now() + 60000 }, config.frameKey));
+    const dup = await (await post({ node_id: "N-0812-B", channel: "sound", frame_b64: again })).json();
+    assert.equal(dup.duplicate, true); assert.ok(dup.ack_b64);
+    assert.equal(store.packets.length, 1);
+    assert.deepEqual(store.packets[0].hearings.map((h) => h.channel), ["ble", "sound"]);
+    // a forged frame is refused
+    const bad = Buffer.from(fromBase64(sos)); bad[3] ^= 0xff;
+    assert.equal((await post({ node_id: "N-0812-C", channel: "sound", frame_b64: toBase64(bad) })).status, 400);
+  } finally { server.closeAllConnections?.(); server.close(); }
+});
