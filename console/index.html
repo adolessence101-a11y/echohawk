@@ -56,13 +56,13 @@ const H = { authorization: `Bearer ${token}`, "content-type": "application/json"
 const $ = (id) => document.getElementById(id);
 let selected = null, joined = false, catalog = null;
 async function loadCalls() {
-  const calls = await fetch("/calls?status=active").then(r=>r.json());
-  $("calls").innerHTML = calls.map(c => `<div class="call ${c.id===selected?"sel":""}" onclick="select('${c.id}')"><b>${c.id}</b> ${c.rung?`<span class="rung ${c.rung}">${c.rung}</span>`:""}<br><small>${c.language||"und"} · ${c.target||"?"} sev ${c.severity||"?"} · ${c.zone_id||"?"} · ${Math.floor(c.elapsed_s/60)}m${c.elapsed_s%60}s · ${c.status}</small></div>`).join("") || `<div class="note">No live calls. Run <code>npm run fake-call -- ws://localhost:8787 spanish</code> to simulate one.</div>`;
+  let calls; try { calls = await fetch("/calls?status=active").then(r=>r.json()); } catch { return; }
+  $("calls").innerHTML = calls.map(c => `<div class="call ${c.id===selected?"sel":""}" onclick="select('${esc(c.id)}')"><b>${esc(c.id)}</b> ${c.rung?`<span class="rung ${esc(c.rung)}">${esc(c.rung)}</span>`:""}<br><small>${esc(c.language||"und")} · ${esc(c.target||"?")} sev ${esc(String(c.severity||"?"))} · ${esc(c.zone_id||"?")} · ${Math.floor(c.elapsed_s/60)}m${c.elapsed_s%60}s · ${esc(c.status)}</small></div>`).join("") || `<div class="note">No live calls. Run <code>npm run fake-call -- ws://localhost:8787 spanish</code> to simulate one.</div>`;
 }
 async function select(id) { selected = id; joined = false; ["join","transfer"].forEach(b => $(b).disabled = false); ["say","mic","send"].forEach(b => $(b).disabled = true); $("join").textContent = "Join (Interpreter Mode)"; await loadCalls(); await loadTranscript(); }
 async function loadTranscript() {
   if (!selected) return;
-  const turns = await fetch(`/calls/${selected}/transcript`).then(r=>r.json());
+  let turns; try { turns = await fetch(`/calls/${selected}/transcript`).then(r=>r.json()); } catch { return; }
   $("title").textContent = `Transcript · ${selected}`;
   $("transcript").innerHTML = turns.map(t => `<div class="turn ${t.role}"><div class="who">${t.role}${t.lang_original?` · ${t.lang_original}`:""}</div><div class="orig">${esc(t.text_original)}</div>${t.text_translated?`<div class="tr">→ ${esc(t.text_translated)}</div>`:""}</div>`).join("");
   $("transcript").lastElementChild?.scrollIntoView({block:"end"});
@@ -77,7 +77,11 @@ $("transfer").onclick = async () => { if (!selected) return; alert("Transfer pat
 // Hold-to-talk with the browser's speech recognition; typed input is the fallback (A13 passes either way).
 const SR = window.SpeechRecognition || window.webkitSpeechRecognition; let rec = null;
 if (SR) { rec = new SR(); rec.interimResults = false; rec.onresult = (e) => { $("say").value = e.results[0][0].transcript; say(); }; $("mic").onmousedown = () => { rec.lang = $("lang").value === "es" ? "es-MX" : "en-US"; rec.start(); $("mic").classList.add("live"); }; $("mic").onmouseup = () => { rec.stop(); $("mic").classList.remove("live"); }; } else { $("mic").title = "Speech recognition not available in this browser; type instead"; }
-async function loadKits() { catalog = await fetch("/kits").then(r=>r.json()); $("kits").innerHTML = catalog.kits.map(k => `<div class="kit"><b>${k.title}</b><br><small>${k.kit_id} · ${k.mode} · review: ${k.medical_review}</small><br><button onclick="pushKit('${k.kit_id}')">Show to caller</button></div>`).join("") + `<div class="kit"><button onclick="pushKit(null)">Close current card</button></div>`; }
+async function loadKits() {
+  let data; try { data = await fetch("/kits").then(r=>r.json()); } catch { return; }
+  catalog = data;
+  $("kits").innerHTML = (catalog.kits||[]).map(k => `<div class="kit"><b>${esc(k.title)}</b><br><small>${esc(k.kit_id)} · ${esc(k.mode)} · review: ${esc(k.medical_review)}</small><br><button onclick="pushKit('${esc(k.kit_id)}')">Show to caller</button></div>`).join("") + `<div class="kit"><button onclick="pushKit(null)">Close current card</button></div>`;
+}
 async function pushKit(id) { if (!selected) return alert("select a call"); const r = await fetch(`/calls/${selected}/kit`, {method:"POST", headers:H, body:JSON.stringify({kit_id:id})}); $("status").textContent = r.ok ? (id ? `card ${id} pushed` : "card closed") : "failed"; }
 const es = new EventSource("/events/stream");
 ["turn_added","turn_translated","dispatcher_said","call_started","call_ended","transfer_started","kit_shown","rung_changed","packet_created"].forEach(t => es.addEventListener(t, () => { loadCalls(); loadTranscript(); }));

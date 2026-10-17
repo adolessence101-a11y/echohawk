@@ -99,6 +99,7 @@
 <script src="/vendor/ggwave.js"></script>
 <script>
 const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s||"").replace(/[&<>"']/g, (m) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[m]));
 const S = (k, v) => { try { v === undefined ? null : localStorage.setItem(k, JSON.stringify(v)); return JSON.parse(localStorage.getItem(k)); } catch { return null; } };
 const me = () => S("me") || {};
 function show(v) { document.querySelectorAll(".view").forEach((x) => x.classList.toggle("on", x.id === `v-${v}`)); document.querySelectorAll("nav button").forEach((b) => b.classList.toggle("on", b.dataset.v === v)); }
@@ -135,7 +136,7 @@ async function loadKits() {
   let cat = S("kits");
   try { const r = await fetch("/kits"); if (r.ok) { cat = await r.json(); S("kits", cat); } } catch {}
   if (!cat) { $("kitList").innerHTML = `<div class="card"><small>Open once while online to cache the kit catalog.</small></div>`; return; }
-  $("kitList").innerHTML = cat.kits.map((k) => `<div class="card"><h3>${k.title}</h3><span class="badge">${k.kit_id}</span> <span class="badge">${k.mode}</span> <span class="badge">${k.medical_review === "pending" ? "pending medical review" : "review: " + k.medical_review}</span>${k.requires_human ? ` <span class="badge" style="border-color:var(--red)">call a person too</span>` : ""}<ol>${(k.display_steps || []).map((s) => `<li>${s}</li>`).join("")}</ol><div class="script">${(k.script_lines || []).map((l) => `<p>${l}</p>`).join("")}</div><small>Source: ${k.authority || ""}${k.reference_url ? ` · <a href="${k.reference_url}" style="color:var(--blue)">reference</a>` : ""} · checked ${k.last_source_check || "unverified"}</small></div>`).join("");
+  $("kitList").innerHTML = (cat.kits||[]).map((k) => `<div class="card"><h3>${esc(k.title)}</h3><span class="badge">${esc(k.kit_id)}</span> <span class="badge">${esc(k.mode)}</span> <span class="badge">${k.medical_review === "pending" ? "pending medical review" : "review: " + esc(k.medical_review)}</span>${k.requires_human ? ` <span class="badge" style="border-color:var(--red)">call a person too</span>` : ""}<ol>${(k.display_steps || []).map((s) => `<li>${esc(s)}</li>`).join("")}</ol><div class="script">${(k.script_lines || []).map((l) => `<p>${esc(l)}</p>`).join("")}</div><small>Source: ${esc(k.authority || "")}${k.reference_url ? ` · <a href="${k.reference_url}" style="color:var(--blue)">reference</a>` : ""} · checked ${esc(k.last_source_check || "unverified")}</small></div>`).join("");
 }
 loadKits();
 
@@ -160,9 +161,9 @@ async function verifyFrame(bytes) {
 function speak(text, lang) { try { const u = new SpeechSynthesisUtterance(text); u.lang = lang === "es" ? "es-MX" : "en-US"; speechSynthesis.speak(u); } catch {} }
 async function onFrame(bytes) {
   const f = await verifyFrame(bytes); const box = $("lastAlert"); box.style.display = "block";
-  if (!f.ok) { box.className = "card alert bad"; box.innerHTML = `<h3>Chirp received, not trusted</h3><small>${f.error}. Nothing is shown or spoken from an unsigned or replayed frame.</small>`; return; }
+  if (!f.ok) { box.className = "card alert bad"; box.innerHTML = `<h3>Chirp received, not trusted</h3><small>${esc(f.error)}. Nothing is shown or spoken from an unsigned or replayed frame.</small>`; return; }
   const lang = me().lang || f.language; const line = (SAY[f.action] || SAY.info_only)[lang] || (SAY[f.action] || SAY.info_only).en;
-  box.className = "card alert ok"; box.innerHTML = `<h3>${f.action.replace(/_/g, " ").toUpperCase()} · zone ${f.zone}</h3><p>${line}</p><small>${f.target} · severity ${f.severity} · signed directive #${f.sequence} issued ${f.issuedAt.slice(11, 16)} UTC · verified on this phone, no network</small>`;
+  box.className = "card alert ok"; box.innerHTML = `<h3>${esc(f.action.replace(/_/g, " ").toUpperCase())} · zone ${f.zone}</h3><p>${esc(line)}</p><small>${esc(f.target)} · severity ${f.severity} · signed directive #${f.sequence} issued ${esc(f.issuedAt.slice(11, 16))} UTC · verified on this phone, no network</small>`;
   speak(line, lang); if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
 }
 // ggwave: fixed 16-byte payload so the receiver knows the frame boundary. Protocol 1 = audible fast (demo). Ultrasound protocols are quieter but shorter range.
