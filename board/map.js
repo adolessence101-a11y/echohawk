@@ -10,18 +10,27 @@ window.EH_MAP = (() => {
 
   async function loadRD(status) {
     const say = (t) => status && (status.textContent = t);
-    try { const r = await fetch("/geo/rd"); if (r.ok) return await r.json(); } catch {}
+    try { const r = await fetch("/geo/rd"); if (r.ok) { const c = await r.json(); if (!c.exceededTransferLimit) return c; } } catch {}
     say("Loading LAPD reporting districts from the City of LA GIS (first time only)…");
-    const r = await fetch(ARCGIS);
-    if (!r.ok) throw new Error(`City GIS returned ${r.status}`);
-    const gj = await r.json();
-    fetch("/geo/rd", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(gj) }).catch(() => {});
-    return gj;
+    // the service returns at most 1000 features per request; page with resultOffset until it says there is no more
+    const all = { type: "FeatureCollection", features: [] };
+    for (let offset = 0; offset < 5000; offset += 1000) {
+      const r = await fetch(`${ARCGIS}&orderByFields=OBJECTID&resultOffset=${offset}&resultRecordCount=1000`);
+      if (!r.ok) throw new Error(`City GIS returned ${r.status}`);
+      const page = await r.json();
+      all.features.push(...(page.features || []));
+      if (!page.exceededTransferLimit && !(page.properties && page.properties.exceededTransferLimit)) break;
+    }
+    fetch("/geo/rd", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(all) }).catch(() => {});
+    return all;
   }
 
   async function create(el, { status, center = [34.05, -118.4], zoom = 10 } = {}) {
     const map = L.map(el, { zoomControl: true, attributionControl: true }).setView(center, zoom);
-    L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", { maxZoom: 18, subdomains: "abcd", attribution: '&copy; OpenStreetMap contributors &copy; CARTO · Districts: City of LA GIS' }).addTo(map);
+    // Esri dark gray canvas: no API key required. Labels come as a separate reference layer drawn above the polygons.
+    L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}", { maxZoom: 16, attribution: "Tiles &copy; Esri, HERE, Garmin, &copy; OpenStreetMap contributors · Districts: City of LA GIS" }).addTo(map);
+    map.createPane("labels"); map.getPane("labels").style.zIndex = 650; map.getPane("labels").style.pointerEvents = "none";
+    L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Reference/MapServer/tile/{z}/{y}/{x}", { maxZoom: 16, pane: "labels" }).addTo(map);
     const byRD = {};
     let layer = null;
     try {
