@@ -73,7 +73,7 @@ const esc = (s) => String(s||"").replace(/[&<>]/g, (m) => ({"&":"&amp;","<":"&lt
 $("join").onclick = async () => { if (!selected) return; const r = await fetch(`/calls/${selected}/join`, {method:"POST", headers:H, body:JSON.stringify({dispatcher_id:"console"})}); if (r.ok) { joined = true; ["say","mic","send"].forEach(b => $(b).disabled = false); $("join").textContent = "Joined · AI is quiet"; } else alert("call not live"); };
 $("send").onclick = say; $("say").addEventListener("keydown", (e) => { if (e.key === "Enter") say(); });
 async function say() { const text = $("say").value.trim(); if (!text || !selected) return; $("say").value = ""; const r = await fetch(`/calls/${selected}/say`, {method:"POST", headers:H, body:JSON.stringify({text, lang_from: $("lang").value})}); const j = await r.json(); $("status").textContent = r.ok ? `sent in ${j.lang_to}: ${j.sent_text}` : (j.error||"failed"); loadTranscript(); }
-$("transfer").onclick = async () => { if (!selected) return; alert("Transfer path is driven by the server (TRANSFER_NUMBER in .env). Primary warm path: confirm at the 10:30 Retell session. Fallback A (cold + brief on this screen) is wired."); };
+$("transfer").onclick = async () => { if (!selected) return; const r = await fetch(`/calls/${selected}/takeover`, {method:"POST", headers:H, body:"{}"}); if (r.ok) { joined = true; ["say","mic","send"].forEach(b => $(b).disabled = false); $("join").textContent = "Joined · AI is quiet"; $("transfer").textContent = "You have the call"; $("status").textContent = "You took the call. The caller was told a dispatcher is on the line."; } else $("status").textContent = "call not live"; loadCalls(); };
 // Hold-to-talk with the browser's speech recognition; typed input is the fallback (A13 passes either way).
 const SR = window.SpeechRecognition || window.webkitSpeechRecognition; let rec = null;
 if (SR) { rec = new SR(); rec.interimResults = false; rec.onresult = (e) => { $("say").value = e.results[0][0].transcript; say(); }; $("mic").onmousedown = () => { rec.lang = $("lang").value === "es" ? "es-MX" : "en-US"; rec.start(); $("mic").classList.add("live"); }; $("mic").onmouseup = () => { rec.stop(); $("mic").classList.remove("live"); }; } else { $("mic").title = "Speech recognition not available in this browser; type instead"; }
@@ -84,7 +84,9 @@ async function loadKits() {
 }
 async function pushKit(id) { if (!selected) return alert("select a call"); const r = await fetch(`/calls/${selected}/kit`, {method:"POST", headers:H, body:JSON.stringify({kit_id:id})}); $("status").textContent = r.ok ? (id ? `card ${id} pushed` : "card closed") : "failed"; }
 const es = new EventSource("/events/stream");
-["turn_added","turn_translated","dispatcher_said","call_started","call_ended","transfer_started","kit_shown","rung_changed","packet_created"].forEach(t => es.addEventListener(t, () => { loadCalls(); loadTranscript(); }));
+// live: Retell streams turns as they are spoken (turn_updated), so refresh on that too, debounced
+let pend = null; const live = () => { clearTimeout(pend); pend = setTimeout(() => { loadCalls(); loadTranscript(); }, 250); };
+["turn_added","turn_updated","turn_translated","dispatcher_said","call_started","call_ended","transfer_started","trigger_fired","language_detected","kit_shown","rung_changed","packet_created"].forEach(t => es.addEventListener(t, live));
 loadCalls(); loadKits(); setInterval(loadCalls, 5000);
 </script>
 </body>

@@ -165,6 +165,17 @@ export class RetellHub {
     this.store.appendEvent({ event_type: "dispatcher_joined", call_id: callId, actor: "dispatcher", provenance: "firsthand", payload_json: { dispatcher_id: dispatcherId } });
     return { ok: true, caller_language: s.callerLang };
   }
+  // Dispatcher takes the call from the AI: join (AI goes quiet) and tell the caller, in their language, a person is on.
+  async takeover(callId, dispatcherId = "dispatcher") {
+    const s = this.sessions.get(callId); if (!s) return { ok: false, status: 404 };
+    this.join(callId, dispatcherId);
+    const c = this.store.calls.find((x) => x.id === callId); if (c) { c.status = "transferred"; c.transfer_path = "console_takeover"; }
+    const line = s.callerLang === "es" ? "Un despachador está en la línea con usted ahora. Siga hablando, le escuchamos." : "A dispatcher is on the line with you now. Keep talking, we can hear you.";
+    s.interruptSeq += 1;
+    this.send(s.ws, { response_type: "agent_interrupt", interrupt_id: s.interruptSeq, content: line, content_complete: true, no_interruption_allowed: false });
+    this.store.appendEvent({ event_type: "transfer_started", call_id: callId, actor: "dispatcher", provenance: "firsthand", payload_json: { path: "console_takeover" } });
+    return { ok: true, caller_language: s.callerLang };
+  }
   async say(callId, text, fromLang = "en") {
     const s = this.sessions.get(callId); if (!s) return { ok: false, status: 404 };
     const toLang = s.callerLang === "und" ? "en" : s.callerLang;

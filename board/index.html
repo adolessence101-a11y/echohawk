@@ -84,7 +84,7 @@ async function ack(id) { await fetch(`/incidents/${id}/ack`, {method:"POST", hea
 async function closeInc(id) { const r = await fetch(`/incidents/${id}/close`, {method:"POST", headers:H, body:JSON.stringify({reason:"supervisor closed from board"})}); if (!r.ok) alert((await r.json()).error); refresh(); }
 const es = new EventSource("/events/stream");
 es.onmessage = () => {};
-["packet_created","incident_opened","rung_changed","trigger_fired","incident_spread","scan_flagged","transfer_started","kit_shown","callback_no_answer","dispatcher_joined","dispatcher_said"].forEach(t => es.addEventListener(t, (e) => { const ev = JSON.parse(e.data); const d = document.createElement("div"); d.innerHTML = `<time>${fmt(ev.ts_server)}</time><b>${ev.event_type}</b> ${ev.payload_json?JSON.stringify(ev.payload_json).slice(0,140):""}`; $("changes").prepend(d); while ($("changes").children.length > 60) $("changes").lastChild.remove(); refresh(); }));
+["packet_created","incident_opened","rung_changed","trigger_fired","incident_spread","scan_flagged","transfer_started","kit_shown","callback_no_answer","dispatcher_joined","dispatcher_said"].forEach(t => es.addEventListener(t, (e) => { const ev = JSON.parse(e.data); const d = document.createElement("div"); d.innerHTML = `<time>${fmt(ev.ts_server)}</time><b>${ev.event_type}</b> ${ev.payload_json?JSON.stringify(ev.payload_json).slice(0,140):""}`; $("changes").prepend(d); while ($("changes").children.length > 60) $("changes").lastChild.remove(); clearTimeout(window._rf); window._rf = setTimeout(refresh, 250); }));
 refresh(); setInterval(refresh, 5000);
 </script>
 </body>
