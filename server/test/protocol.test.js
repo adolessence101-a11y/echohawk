@@ -129,3 +129,40 @@ test("streaming transcript: growing turns are updated, not frozen at the first f
   assert.equal(ctx.store.packets[0].target, "water");
   assert.match(resp.content, /zone 6/i);
 }));
+
+// Replays of the two real test calls from Oct 17 that went wrong (repeat loop; Spanish answered in English).
+async function talk(ws, transcript, rid) {
+  ws.send(JSON.stringify({ interaction_type: "response_required", response_id: rid, transcript }));
+  const r = await once(ws, (m) => m.response_type === "response" && m.response_id === rid);
+  transcript.push({ role: "agent", content: r.content });
+  return r;
+}
+
+test("no-key dialog never repeats the hurt question and ends the call after the wrap-up", () => withServer(async (ctx) => {
+  const ws = ctx.connect("call_norepeat"); await ws.ready; await once(ws, (m) => m.response_type === "config");
+  const tr = [{ role: "user", content: "Zone six. Our water pressure dropped to nothing." }];
+  const r1 = await talk(ws, tr, 1); assert.match(r1.content, /zone 6.*anyone hurt/i);
+  tr.push({ role: "user", content: "No." });
+  const r2 = await talk(ws, tr, 2); assert.doesNotMatch(r2.content, /anyone hurt or in danger/i); assert.match(r2.content, /anything else/i);
+  tr.push({ role: "user", content: "No, that's it." });
+  const r3 = await talk(ws, tr, 3); assert.equal(r3.end_call, true); assert.match(r3.content, /stay safe/i);
+  assert.ok(!ctx.store.events.some((e) => e.event_type === "transfer_started"), "a water report is not transferred");
+}));
+
+test("yes to 'anyone hurt' transfers", () => withServer(async (ctx) => {
+  const ws = ctx.connect("call_hurt"); await ws.ready; await once(ws, (m) => m.response_type === "config");
+  const tr = [{ role: "user", content: "Zone seven, a tree is down blocking the road." }];
+  await talk(ws, tr, 1);
+  tr.push({ role: "user", content: "Yes, my neighbor is under it." });
+  const r = await talk(ws, tr, 2); assert.match(r.content, /connecting you to a dispatcher/i);
+}));
+
+test("Spanish caller gets Spanish replies and the Spanish card with no language tag from Retell", () => withServer(async (ctx) => {
+  const ws = ctx.connect("call_es"); await ws.ready; await once(ws, (m) => m.response_type === "config");
+  const tr = [{ role: "user", content: "Zona cuatro, se fue la luz." }];
+  const r = await talk(ws, tr, 1);
+  assert.match(r.content, /linterna|luz|Puedo/i);
+  assert.equal(ctx.store.calls.find((c) => c.id === "call_es").language, "es");
+  tr.push({ role: "user", content: "No, nadie está herido." });
+  const r2 = await talk(ws, tr, 2); assert.doesNotMatch(r2.content, /\b(the|you|zone)\b/i);
+}));

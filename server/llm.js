@@ -90,10 +90,26 @@ export async function translate(text, toLang, fromLang = "auto") {
   return out || `[${toLang}] ${text}`; // fallback keeps the pipeline visible without a key
 }
 
+// ---- caller language from what they said (Retell's "multi" STT transcribes Spanish but sends no language tag) ----
+const ES_WORDS = /\b(zona|hola|ayuda|por favor|se fue|la luz|sin luz|agua|presi[oó]n|fuego|incendio|humo|herid[oa]|sangr\w*|respira|calle|casa|mi |est[aá]|hay|nadie|s[ií]|gracias|necesito|cuatro|cinco|seis|siete|ocho|nueve|tres|dos|uno|cero|aqu[ií]|ahora|se cay[oó]|no hay|olor a gas)\b/gi;
+const EN_WORDS = /\b(the|my|is|are|our|there|water|power|zone|fire|help|someone|hurt|please|no one|street|house|out|have)\b/gi;
+export function detectLanguage(text, current = "en") {
+  const t = String(text || "");
+  if (/[ñ¿¡]/.test(t)) return "es";
+  const es = (t.match(ES_WORDS) || []).length, en = (t.match(EN_WORDS) || []).length;
+  if (es >= 2 && es > en) return "es";
+  if (en >= 2 && en > es) return "en";
+  return current;
+}
+
 // ---- next agent utterance ----
-const FALLBACK = {
-  en: { where: "I'm here to help. Where are you right now? A cross street, landmark or zone number is fine.", what: (z) => `Got it, zone ${z}. Tell me what's happening.`, logged: (z) => `Got it. I've logged that for zone ${z} and it's on the dispatcher's board. Is anyone hurt or in danger right now?`, again: "Are you still there? Tell me what's happening and I'll log it." },
-  es: { where: "Estoy aquí para ayudar. ¿Dónde está ahora? Un cruce de calles, un punto de referencia o el número de zona es suficiente.", what: (z) => `Entendido, zona ${z}. Cuénteme qué está pasando.`, logged: (z) => `Entendido. Ya lo registré para la zona ${z} y está en el tablero del despachador. ¿Hay alguien herido o en peligro en este momento?`, again: "¿Sigue ahí? Cuénteme qué está pasando y lo registro." },
+export const FALLBACK = {
+  en: { where: "I'm here to help. Where are you right now? A cross street, landmark or zone number is fine.", what: (z) => `Got it, zone ${z}. Tell me what's happening.`, logged: (z) => `Got it. I've logged that for zone ${z} and it's on the dispatcher's board. Is anyone hurt or in danger right now?`, again: "Are you still there? Tell me what's happening and I'll log it.",
+        wrap: (z) => `Thank you. Your report for zone ${z} is on the board, and other reports from your area get grouped with it so the crew sees the whole picture. If anyone gets hurt or it gets worse, call back right away. Is there anything else?`,
+        bye: "Thanks for calling. Stay safe.", connect: "I'm connecting you to a dispatcher right now. Stay on the line.", more: (z) => `Okay, I've added that to the zone ${z} report. Anything else?` },
+  es: { where: "Estoy aquí para ayudar. ¿Dónde está ahora? Un cruce de calles, un punto de referencia o el número de zona es suficiente.", what: (z) => `Entendido, zona ${z}. Cuénteme qué está pasando.`, logged: (z) => `Entendido. Ya lo registré para la zona ${z} y está en el tablero del despachador. ¿Hay alguien herido o en peligro en este momento?`, again: "¿Sigue ahí? Cuénteme qué está pasando y lo registro.",
+        wrap: (z) => `Gracias. Su reporte de la zona ${z} está en el tablero, y los reportes de su área se agrupan con él para que el equipo vea todo el panorama. Si alguien se lastima o empeora, vuelva a llamar de inmediato. ¿Algo más?`,
+        bye: "Gracias por llamar. Cuídese.", connect: "Le estoy conectando con un despachador ahora mismo. No cuelgue.", more: (z) => `Bien, lo agregué al reporte de la zona ${z}. ¿Algo más?` },
 };
 export async function agentReply(transcript, { fields, kitScript, mode, language = "en", reminder = false }) {
   if (kitScript?.length) return kitScript.join(" "); // read the approved card verbatim, nothing else
@@ -104,9 +120,27 @@ export async function agentReply(transcript, { fields, kitScript, mode, language
   ]).catch(() => null);
   if (out) return out;
   // rule-based fallback, in the caller's language when we have it
+  return nextFallbackLine(transcript, { fields, language }).content;
+}
+
+// Rule-based dialog with memory: it knows what it already asked, so it never asks the same question twice.
+// Stages: where -> what -> logged + "anyone hurt?" -> wrap-up -> goodbye (ends the call). A "yes" to the hurt question transfers.
+const YES = /^\s*(yes|yeah|yep|yup|s[ií]|claro|correcto|someone is|somebody is|he is|she is|they are)\b/i;
+const NO = /^\s*(no|nope|nah|nadie|no one|nobody|negative|we're (fine|ok|okay)|all good|estamos bien|nothing|nada)\b/i;
+export function nextFallbackLine(transcript, { fields, language = "en" }) {
   const f = FALLBACK[language] || FALLBACK.en;
-  if (!fields?.zone_id) return f.where;
-  const spokenZone = String(fields.zone_id).replace(/^Z0?/, "");
-  if (fields.target === "unknown") return f.what(spokenZone);
-  return f.logged(spokenZone);
+  const said = (transcript || []).filter((t) => t.role === "agent").map((t) => t.content || "");
+  const lastUser = [...(transcript || [])].reverse().find((t) => t.role === "user")?.content || "";
+  const asked = (prefix) => said.some((x) => x.startsWith(prefix));
+  if (!fields?.zone_id) return { content: asked(f.where.slice(0, 20)) ? f.again : f.where };
+  const z = String(fields.zone_id).replace(/^Z0?/, "");
+  if (fields.target === "unknown") return { content: asked(f.what(z).slice(0, 12)) ? f.again : f.what(z) };
+  const loggedLine = f.logged(z), wrapLine = f.wrap(z);
+  if (!asked(loggedLine.slice(0, 25))) return { content: loggedLine };
+  if (!asked(wrapLine.slice(0, 20))) {
+    if (YES.test(lastUser)) return { content: f.connect, transfer: true };
+    return { content: wrapLine };
+  }
+  if (NO.test(lastUser) || /\b(that's it|that is all|eso es todo|bye|adi[oó]s)\b/i.test(lastUser)) return { content: f.bye, end_call: true };
+  return { content: f.more(z) };
 }

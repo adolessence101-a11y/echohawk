@@ -4,7 +4,8 @@
 import { WebSocketServer } from "ws";
 import { config } from "./config.js";
 import { scanTurn } from "./triggers.js";
-import { extractFields, agentReply, translate } from "./llm.js";
+import { extractFields, agentReply, translate, detectLanguage, nextFallbackLine } from "./llm.js";
+import { config as _cfg } from "./config.js";
 import { makePacket } from "./schema.js";
 import { showKitCard, kitForFields } from "./kits.js";
 
@@ -85,6 +86,9 @@ export class RetellHub {
   async respond(s, msg, { reminder }) {
     this.absorbTranscript(s, msg.transcript);
     const lastUser = [...s.transcript].reverse().find((t) => t.role === "user")?.content || "";
+    // language from the caller's own words; sticky once Spanish is heard
+    const lang = detectLanguage(s.transcript.filter((t) => t.role === "user").map((t) => t.content).join(" "), s.callerLang);
+    if (lang !== s.callerLang) { s.callerLang = lang; const c = this.store.calls.find((x) => x.id === s.callId); if (c) c.language = lang; this.store.appendEvent({ event_type: "language_detected", call_id: s.callId, actor: "system", provenance: "firsthand", payload_json: { language: lang } }); }
     const triggers = scanTurn(lastUser);
 
     // 1) hard trigger: transfer first, card in parallel, never one gating the other
@@ -111,15 +115,23 @@ export class RetellHub {
 
     // 5) non-emergency escalation after N turns
     const userTurns = s.transcript.filter((t) => t.role === "user").length;
-    if (userTurns >= config.retell.nonEmergencyEscalateAfterTurns && !s.transferStarted && (s.fields?.severity || 1) >= 3) { s.transferStarted = true; this.send(s.ws, { response_type: "response", response_id: msg.response_id, content: "I want a person to take this from here. Connecting you now.", content_complete: true, ...this.transferDirective(s) }); return; }
+    if (userTurns >= config.retell.nonEmergencyEscalateAfterTurns && !s.transferStarted && (s.fields?.severity || 1) >= 4) { s.transferStarted = true; this.send(s.ws, { response_type: "response", response_id: msg.response_id, content: "I want a person to take this from here. Connecting you now.", content_complete: true, ...this.transferDirective(s) }); return; }
 
     // 6) kit on Tuesday (power out, low severity)
     let kitScript = null;
     const kitId = kitForFields(s.fields, triggers);
     if (kitId && !s.kitShown) { const shown = showKitCard({ kit_id: kitId, zone_id: s.fields?.zone_id, call_id: s.callId, language: s.callerLang }, this.store, "ai"); if (shown.ok) { s.kitShown = kitId; kitScript = shown.script_lines; this.send(s.ws, { response_type: "metadata", metadata: { show_kit_card: shown } }); } }
 
-    const content = await agentReply(s.transcript, { fields: s.fields, kitScript, mode: "tuesday", language: s.callerLang, reminder });
-    this.send(s.ws, { response_type: "response", response_id: msg.response_id, content, content_complete: true });
+    if (kitScript || _cfg.llm.apiKey) {
+      const content = await agentReply(s.transcript, { fields: s.fields, kitScript, mode: "tuesday", language: s.callerLang, reminder });
+      this.send(s.ws, { response_type: "response", response_id: msg.response_id, content, content_complete: true });
+      return;
+    }
+    // no model configured: stateful rule-based dialog (never repeats a question; ends politely; "yes, someone is hurt" transfers)
+    if (reminder) { this.send(s.ws, { response_type: "response", response_id: msg.response_id, content: (await agentReply([], { language: s.callerLang, reminder: true })), content_complete: true }); return; }
+    const step = nextFallbackLine(s.transcript, { fields: s.fields, language: s.callerLang });
+    if (step.transfer && !s.transferStarted) { s.transferStarted = true; this.store.appendEvent({ event_type: "trigger_fired", call_id: s.callId, actor: "system", provenance: "firsthand", payload_json: { triggers: ["caller_reports_injury"] } }); }
+    this.send(s.ws, { response_type: "response", response_id: msg.response_id, content: step.content, content_complete: true, ...(step.end_call ? { end_call: true } : {}), ...(step.transfer ? this.transferDirective(s) : {}) });
   }
 
   async ensurePacket(s, { triggers, force = false }) {
