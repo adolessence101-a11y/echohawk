@@ -16,5 +16,5 @@ hub.attach(server);
 server.listen(config.port, () => {
   console.log(`EchoHawk on http://localhost:${config.port}  board=/  console=/console  app=/app  chirp=/chirp`);
   console.log(`Retell custom LLM websocket: ${config.publicBaseUrl.replace(/^http/, "ws")}/retell/llm/{call_id}`);
-  console.log(`LLM: ${config.llm.baseUrl ? config.llm.model : "rule-based fallback (set LLM_BASE_URL and LLM_API_KEY)"}`);
+  console.log(`LLM: ${config.llm.apiKey ? `${config.llm.provider} ${config.llm.model}` : "rule-based script (set ANTHROPIC_API_KEY in .env to use Claude)"}`);
 });

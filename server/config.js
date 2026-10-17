@@ -12,11 +12,13 @@ export const config = {
     dispatcher: process.env.DISPATCHER_TOKEN || "dev-dispatcher",
     supervisor: process.env.SUPERVISOR_TOKEN || "dev-supervisor",
   },
-  llm: {
-    baseUrl: process.env.LLM_BASE_URL || "",
-    apiKey: process.env.LLM_API_KEY || "",
-    model: process.env.LLM_MODEL || "gpt-4o-mini",
-  },
+  // Claude (Anthropic Messages API) when ANTHROPIC_API_KEY is set; otherwise any OpenAI-compatible endpoint; otherwise rules.
+  get llm() {
+    // a Claude key works on either line: ANTHROPIC_API_KEY, or LLM_API_KEY when it starts with sk-ant-
+    const claudeKey = process.env.ANTHROPIC_API_KEY || (/^sk-ant-/.test(process.env.LLM_API_KEY || "") ? process.env.LLM_API_KEY : "");
+    return claudeKey
+    ? { provider: "anthropic", baseUrl: process.env.ANTHROPIC_BASE_URL || "https://api.anthropic.com", apiKey: claudeKey, model: /^claude/.test(process.env.LLM_MODEL || "") ? process.env.LLM_MODEL : "claude-haiku-5-5", timeoutMs: Number(process.env.LLM_TIMEOUT_MS || 4000) }
+    : { provider: "openai", baseUrl: process.env.LLM_BASE_URL || "", apiKey: process.env.LLM_API_KEY || "", model: process.env.LLM_MODEL || "gpt-4o-mini", timeoutMs: Number(process.env.LLM_TIMEOUT_MS || 4000) }; }, // read at call time
 
   engine: {
     mergeWindowMs: 15 * 60 * 1000,          // team judgment; anchored to RapidSOS patent 15-min block, Jasso 2007 10-min spacing

@@ -1,13 +1,35 @@
-// One function in front of any OpenAI-compatible chat API, with a rule-based fallback so the demo runs with no key.
+// One function in front of Claude (Anthropic Messages API) or any OpenAI-compatible chat API, with a rule-based fallback so the demo runs with no key.
 // Also: four-field extraction and translation. Model name and base URL come from env (config.llm).
 import { config } from "./config.js";
 import { TARGETS, ACTIONS } from "./schema.js";
 
 export async function complete(messages, { json = false } = {}) {
-  const { baseUrl, apiKey, model } = config.llm;
+  const { provider, baseUrl, apiKey, model, timeoutMs } = config.llm;
   if (!baseUrl || !apiKey) return null; // caller falls back to rules
+  const signal = AbortSignal.timeout(timeoutMs || 4000); // a caller on the line never waits longer than this
+  if (provider === "anthropic") {
+    // Messages API: system prompt is a top-level field; turns must alternate and start with the user.
+    const system = messages.filter((m) => m.role === "system").map((m) => m.content).join("\n\n") + (json ? "\n\nRespond with a single JSON object and nothing else." : "");
+    const turns = [];
+    for (const m of messages.filter((m) => m.role !== "system")) {
+      const role = m.role === "assistant" ? "assistant" : "user";
+      const text = String(m.content || "").trim() || "(silence)";
+      if (turns.length && turns.at(-1).role === role) turns.at(-1).content += "\n" + text; else turns.push({ role, content: text });
+    }
+    if (!turns.length || turns[0].role !== "user") turns.unshift({ role: "user", content: "(call connected)" });
+    if (turns.at(-1).role !== "user") turns.push({ role: "user", content: "(caller is silent)" });
+    const res = await fetch(`${baseUrl.replace(/\/$/, "")}/v1/messages`, {
+      method: "POST", signal,
+      headers: { "content-type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01", ...(process.env.ANTHROPIC_WORKSPACE_ID ? { "anthropic-workspace-id": process.env.ANTHROPIC_WORKSPACE_ID } : {}) },
+      body: JSON.stringify({ model, max_tokens: json ? 300 : 200, system, messages: turns }), // no temperature: current Claude models reject it
+    });
+    if (!res.ok) throw new Error(`Claude ${res.status}: ${(await res.text()).slice(0, 300)}`);
+    const data = await res.json();
+    const text = (data.content || []).filter((b) => b.type === "text").map((b) => b.text).join("").trim();
+    return json ? text.replace(/^```(?:json)?\s*|\s*```$/g, "") : text;
+  }
   const res = await fetch(`${baseUrl.replace(/\/$/, "")}/chat/completions`, {
-    method: "POST",
+    method: "POST", signal,
     headers: { "content-type": "application/json", authorization: `Bearer ${apiKey}` },
     body: JSON.stringify({ model, messages, temperature: 0.2, ...(json ? { response_format: { type: "json_object" } } : {}) }),
   });
@@ -115,9 +137,11 @@ export async function agentReply(transcript, { fields, kitScript, mode, language
   if (kitScript?.length) return kitScript.join(" "); // read the approved card verbatim, nothing else
   if (reminder) return (FALLBACK[language] || FALLBACK.en).again; // caller went quiet: one nudge, not a repeat of the last line
   const out = await complete([
-    { role: "system", content: `You are EchoHawk, an overflow and non-emergency intake line working behind a 911 center. You are not 911. Speak in the caller's language. Ask one question at a time. Collect: where (a zone, cross street or landmark; never ask for a full address unless needed for help to arrive), what is happening, how severe, what they need. Never give medical steps or any instruction that is not an approved card. If anything sounds life-threatening, say you are connecting them to a dispatcher now. Never hang up without a next step.` },
+    { role: "system", content: `You are EchoHawk, an overflow and non-emergency intake line working behind a 911 center. You are not 911. Speak in the caller's language. Ask one question at a time. Collect: where (a zone, cross street or landmark; never ask for a full address unless needed for help to arrive), what is happening, how severe, what they need. Never give medical steps or any instruction that is not an approved card. If anything sounds life-threatening, say you are connecting them to a dispatcher now. Never hang up without a next step.
+This is a live phone call read aloud by a voice: reply in one or two short spoken sentences, no lists, no markdown. Never ask a question the caller already answered. Reply in ${language === "es" ? "Spanish" : "the caller's language (English unless they speak another)"}.
+Known so far: ${JSON.stringify({ zone: fields?.zone_id || null, target: fields?.target || null, severity: fields?.severity || null })}. Once zone and what happened are known and you have asked once whether anyone is hurt, confirm it is logged for the dispatcher's board, tell them to call back if anyone gets hurt or it gets worse, and say goodbye.` },
     ...transcript.map((t) => ({ role: t.role === "agent" ? "assistant" : "user", content: t.content })),
-  ]).catch(() => null);
+  ]).catch((e) => { console.warn("LLM reply failed, using script:", e.message); return null; });
   if (out) return out;
   // rule-based fallback, in the caller's language when we have it
   return nextFallbackLine(transcript, { fields, language }).content;
