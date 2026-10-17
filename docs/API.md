@@ -1,0 +1,103 @@
+# EchoHawk API Reference
+
+Auth is a Bearer token (or `?token=` query param). Roles: **supervisor**, **dispatcher**, **anon** (no token).
+
+---
+
+## REST Routes
+
+| Method | Path | Min role | Request body (JSON) | Response shape | Events emitted |
+|--------|------|----------|---------------------|----------------|----------------|
+| GET | `/health` | anon | — | `{ ok, calls_active, paid_concurrency, mode }` | — |
+| POST | `/webhooks/retell` | — (HMAC sig) | Retell webhook body | `{ ok }` | `retell_<ev>`, `packet_reconciled` |
+| POST | `/packets` | anon | `{ zone_id, target, severity, action, text?, … }` | `{ packet_id, incident_id, rung, reason }` | `packet_ingested`, `incident_opened/updated` |
+| POST | `/device/packets` | anon | same as `/packets`; `source` defaults to `"ehawk"`, `provenance` to `"forwarded"` | `{ packet_id, incident_id, rung }` | same as above |
+| GET | `/incidents` | anon | `?rung=<rung>` (optional filter) | array of incident objects | — |
+| GET | `/incidents/:id` | anon | — | incident + `packets[]` + `events[]` | — |
+| POST | `/incidents/:id/ack` | dispatcher | — | `{ ok }` | `acknowledged_by_human` |
+| POST | `/incidents/:id/close` | dispatcher | `{ reason? }` | `{ ok }` or error | `incident_closed` |
+| POST | `/incidents/:id/callback` | anon | `{ attempt_no? }` | callback row `{ id, incident_id, attempt_no, result, … }` | `callback_scheduled` |
+| GET | `/zones/windows` | anon | — | last 2 000 zone-window records | — |
+| POST | `/callbacks/:id/result` | anon | `{ result }` — one of `answered`, `no_answer`, `busy` | `{ ok, callback }` | `callback_no_answer` (+ schedules next if `< 3`); re-schedules via `callback_scheduled` |
+| GET | `/callbacks/open` | anon | — | array of `{ incident_id, zone_id, target, attempts, last_result, minutes_since_first_report }` sorted newest-first | — |
+| GET | `/calls` | anon | `?status=active` (optional) | array of call objects with `target`, `severity`, `rung`, `elapsed_s` | — |
+| GET | `/calls/:id/transcript` | anon | — | array of turn rows | — |
+| POST | `/calls/:id/join` | dispatcher | `{ dispatcher_id? }` | `{ ok, caller_language }` | `dispatcher_joined` |
+| POST | `/calls/:id/say` | dispatcher | `{ text, lang_from? }` | `{ ok, sent_text, lang_to }` | `dispatcher_said` |
+| POST | `/calls/:id/language` | anon | `{ lang }` | `{ ok }` | — |
+| POST | `/calls/:id/kit` | dispatcher | `{ kit_id }` (omit to close) | `{ ok }` or kit card | `kit_changed_by_human` |
+| GET | `/events/stream` | anon | — | SSE stream (see below) | — |
+| GET | `/events` | anon | — | last 500 event rows | — |
+| GET | `/kits` | anon | — | full kit catalog array | — |
+| GET | `/kits/:id` | anon | — | single kit object | — |
+| POST | `/tools/show_kit_card` | anon | `{ kit_id, zone_id?, call_id?, language? }` | kit card with `script_lines[]` | — |
+| POST | `/alerts/same` | anon | `{ event_code, zone, target?, language?, locations? }` | alert row with `frame_b64` | `alert_received`, `alert_revoiced` |
+| GET | `/alerts/directive/:id/frame` | anon | — | `{ frame_b64 }` | — |
+| GET | `/frames/codes` | anon | — | `{ TARGET_CODES, ACTION_CODES, LANG_CODES }` | — |
+| GET | `/twists` | anon | — | all twist rows | — |
+| POST | `/twists` | anon | arbitrary body | saved twist row | — |
+| GET | `/cost/meter` | anon | — | `{ ts, calls_active, paid_concurrency, retell_cents_today, dispatcher_minutes_saved_est, stream, basis }` | — |
+
+---
+
+## SSE — `/events/stream`
+
+Connect with `Accept: text/event-stream`. One `event: hello` frame is sent immediately on connect; thereafter every store event is pushed verbatim.
+
+| SSE event name (`event:` field) | When |
+|----------------------------------|------|
+| `hello` | Handshake on connect |
+| `call_started` | WebSocket opens for a new call |
+| `call_ended` | WebSocket closes |
+| `turn_added` | New transcript turn stored |
+| `turn_translated` | Dispatcher-mode translation complete |
+| `trigger_fired` | Hard trigger detected; transfer imminent |
+| `transfer_started` | Call routed to dispatcher/PSTN |
+| `dispatcher_joined` | Dispatcher joined via `/calls/:id/join` |
+| `dispatcher_said` | Dispatcher spoke via `/calls/:id/say` |
+| `packet_reconciled` | Post-call analysis merged into packet |
+| `acknowledged_by_human` | Incident acked |
+| `incident_closed` | Incident closed |
+| `callback_scheduled` | New callback attempt created |
+| `callback_no_answer` | Callback attempt returned no answer |
+| `kit_changed_by_human` | Dispatcher opened/closed a kit card |
+| `alert_received` | SAME alert ingested |
+| `alert_revoiced` | Alert encoded as device frame |
+| `webhook_rejected` | Retell webhook signature failed |
+| `retell_call_started` | Retell webhook `call_started` event |
+| `retell_call_ended` | Retell webhook `call_ended` event |
+| `retell_call_analyzed` | Retell webhook `call_analyzed` event |
+
+---
+
+## Retell Custom-LLM WebSocket — `ws://.../retell/llm/:callId`
+
+Retell opens the connection; EchoHawk is the server.
+
+### Retell → EchoHawk (`interaction_type`)
+
+| `interaction_type` | Payload fields | Handled as |
+|--------------------|----------------|------------|
+| `ping_pong` | `timestamp` | Echo back `ping_pong` response |
+| `call_details` | `call.metadata.language` | Stores caller language; updates call record |
+| `update_only` | `transcript[]` | Absorbs new turns; no reply required |
+| `response_required` | `transcript[]`, `response_id` | Full LLM reply cycle (extraction → packet → content) |
+| `reminder_required` | `transcript[]`, `response_id` | Same as `response_required`; AI may reply with empty string if dispatcher has joined |
+
+### EchoHawk → Retell (`response_type`)
+
+| `response_type` | Key fields | When sent |
+|-----------------|------------|-----------|
+| `config` | `{ auto_reconnect, call_details, transcript_with_tool_calls }` | Once on connection open |
+| `ping_pong` | `timestamp` | Reply to every `ping_pong` |
+| `response` | `response_id`, `content`, `content_complete: true`, optional `transfer_number` | Reply to `response_required` / `reminder_required` |
+| `agent_interrupt` | `interrupt_id`, `content`, `content_complete: true`, `no_interruption_allowed: false` | **Interpreter Mode only** — dispatcher text injected via `/calls/:id/say` |
+| `metadata` | `metadata.show_kit_card` | Kit card pushed to the Retell client alongside a `response` when a kit fires |
+
+### Interpreter Mode flow
+
+1. Supervisor/dispatcher calls `POST /calls/:id/join` → sets `dispatcherJoined = true` on the session.  
+2. AI goes silent: on subsequent `response_required` the AI sends an empty `response` content.  
+3. Dispatcher calls `POST /calls/:id/say` with English text.  
+4. Server translates to `callerLang` if needed, increments `interruptSeq`, and sends `response_type: agent_interrupt` with the translated text directly to the Retell WebSocket so the caller hears it immediately — bypassing the normal LLM turn cycle.  
+5. The dispatcher utterance is appended to the transcript as role `dispatcher` and emits `dispatcher_said` on the SSE stream so the board updates in real time.
