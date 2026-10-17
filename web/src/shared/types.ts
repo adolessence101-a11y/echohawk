@@ -2,7 +2,9 @@
 export type Rung = "hand" | "ask" | "watch";
 export type Unit = "ems" | "fire" | "police" | "utility" | "callback";
 
-export interface Dispatched { unit: Unit; at: string; by: string; note?: string }
+export interface Dispatched { unit: Unit; at: string; by: string; note?: string; status?: UnitStatus; status_at?: string }
+export type UnitStatus = "assigned" | "en_route" | "on_scene" | "cleared" | "cancelled";
+export interface UnitRow { incident_id: string; zone_id: string; target: string; rung: Rung; n: number; unit: Unit; status: UnitStatus; status_at: string; seconds: number; limit_s: number | null; overdue: boolean; next: UnitStatus[] }
 
 export interface Incident {
   id: string;

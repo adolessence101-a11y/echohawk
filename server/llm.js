@@ -2,6 +2,7 @@
 // Also: four-field extraction and translation. Model name and base URL come from env (config.llm).
 import { config } from "./config.js";
 import { TARGETS, ACTIONS } from "./schema.js";
+import { langName } from "./languages.js";
 
 export async function complete(messages, { json = false } = {}) {
   const { provider, baseUrl, apiKey, model, timeoutMs } = config.llm;
@@ -104,26 +105,16 @@ export async function extractFields(transcriptText) {
 }
 
 // ---- translation for Interpreter Mode ----
-const LANG_NAMES = { es: "Spanish", en: "English", ko: "Korean", zh: "Chinese", tl: "Tagalog", hy: "Armenian", vi: "Vietnamese", fa: "Persian" };
 export async function translate(text, toLang, fromLang = "auto") {
   const out = await complete([
-    { role: "system", content: `Translate the user's text into ${LANG_NAMES[toLang] || toLang}. Keep it short and natural for a phone call. Return only the translation.` },
+    { role: "system", content: `Translate the user's text into ${langName(toLang)}. Keep it short and natural for a phone call. Return only the translation.` },
     { role: "user", content: text },
   ]).catch(() => null);
   return out || `[${toLang}] ${text}`; // fallback keeps the pipeline visible without a key
 }
 
-// ---- caller language from what they said (Retell's "multi" STT transcribes Spanish but sends no language tag) ----
-const ES_WORDS = /\b(zona|hola|ayuda|por favor|se fue|la luz|sin luz|agua|presi[oó]n|fuego|incendio|humo|herid[oa]|sangr\w*|respira|calle|casa|mi |est[aá]|hay|nadie|s[ií]|gracias|necesito|cuatro|cinco|seis|siete|ocho|nueve|tres|dos|uno|cero|aqu[ií]|ahora|se cay[oó]|no hay|olor a gas)\b/gi;
-const EN_WORDS = /\b(the|my|is|are|our|there|water|power|zone|fire|help|someone|hurt|please|no one|street|house|out|have)\b/gi;
-export function detectLanguage(text, current = "en") {
-  const t = String(text || "");
-  if (/[ñ¿¡]/.test(t)) return "es";
-  const es = (t.match(ES_WORDS) || []).length, en = (t.match(EN_WORDS) || []).length;
-  if (es >= 2 && es > en) return "es";
-  if (en >= 2 && en > es) return "en";
-  return current;
-}
+// ---- caller language: 15 languages, see languages.js ----
+export { detectLanguage } from "./languages.js";
 
 // ---- next agent utterance ----
 export const FALLBACK = {
@@ -139,7 +130,7 @@ export async function agentReply(transcript, { fields, kitScript, mode, language
   if (reminder) return (FALLBACK[language] || FALLBACK.en).again; // caller went quiet: one nudge, not a repeat of the last line
   const out = await complete([
     { role: "system", content: `You are EchoHawk, an overflow and non-emergency intake line working behind a 911 center. You are not 911. Speak in the caller's language. Ask one question at a time. Collect: where (a zone, cross street or landmark; never ask for a full address unless needed for help to arrive), what is happening, how severe, what they need. Never give medical steps or any instruction that is not an approved card. If anything sounds life-threatening, say you are connecting them to a dispatcher now. Never hang up without a next step.
-This is a live phone call read aloud by a voice: reply in one or two short spoken sentences, no lists, no markdown. Never ask a question the caller already answered. Reply in ${language === "es" ? "Spanish" : "the caller's language (English unless they speak another)"}.
+This is a live phone call read aloud by a voice: reply in one or two short spoken sentences, no lists, no markdown. Never ask a question the caller already answered. Reply in ${language && language !== "en" ? langName(language) : "the caller's language (English unless they speak another)"}, in that language's own script.
 Known so far: ${JSON.stringify({ zone: fields?.zone_id || null, target: fields?.target || null, severity: fields?.severity || null })}. Once zone and what happened are known and you have asked once whether anyone is hurt, confirm it is logged for the dispatcher's board, tell them to call back if anyone gets hurt or it gets worse, and say goodbye.` },
     ...transcript.map((t) => ({ role: t.role === "agent" ? "assistant" : "user", content: t.content })),
   ]).catch((e) => { console.warn("LLM reply failed, using script:", e.message); return null; });

@@ -4,7 +4,7 @@ import type { EventRow } from "./types";
 export const ALL_EVENTS = [
   "packet_created", "incident_opened", "rung_changed", "trigger_fired", "incident_spread", "scan_flagged",
   "units_dispatched", "call_flagged", "transfer_started", "kit_shown", "callback_no_answer", "dispatcher_joined", "dispatcher_said",
-  "incident_closed", "acknowledged_by_human", "turn_added", "turn_updated", "turn_translated", "language_detected", "call_started", "call_ended",
+  "incident_closed", "acknowledged_by_human", "turn_added", "turn_updated", "turn_translated", "language_detected", "call_started", "call_ended", "alert_sent", "alert_requested", "alert_cancelled", "alert_ack", "alert_translated", "alert_drafted", "unit_status", "incident_disposition",
 ];
 
 // Subscribe to the server's named SSE events. The handler ref keeps the latest closure without resubscribing.

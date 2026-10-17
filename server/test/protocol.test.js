@@ -52,7 +52,7 @@ test("A8 over the wire: qualified breathing triggers transfer with no kit", () =
   const ws = ctx.connect("call_test_2"); await ws.ready; await once(ws, (m) => m.response_type === "config");
   const transcript = [{ role: "user", content: "Zone Z09, my mother collapsed, she's sort of breathing, like gasping." }];
   ws.send(JSON.stringify({ interaction_type: "response_required", response_id: 1, transcript }));
-  const resp = await once(ws, (m) => m.response_type === "response");
+  const resp = await once(ws, (m) => m.response_type === "response" && m.response_id !== 0);
   assert.match(resp.content, /connecting you to a dispatcher/i);
   assert.ok(ctx.store.events.some((e) => e.event_type === "trigger_fired"));
   assert.ok(ctx.store.events.some((e) => e.event_type === "transfer_started"));
@@ -67,7 +67,7 @@ test("A9/A11 over the wire: bleeding fires transfer AND the approved card, read 
   ws.send(JSON.stringify({ interaction_type: "response_required", response_id: 1, transcript }));
   const meta = await once(ws, (m) => m.response_type === "metadata");
   assert.equal(meta.metadata.show_kit_card.kit_id, "EH-BLEED-001");
-  const resp = await once(ws, (m) => m.response_type === "response");
+  const resp = await once(ws, (m) => m.response_type === "response" && m.response_id !== 0);
   assert.equal(resp.content, meta.metadata.show_kit_card.script_lines.join(" "));
   assert.ok(ctx.store.events.some((e) => e.event_type === "transfer_started"));
 }));
@@ -121,7 +121,7 @@ test("streaming transcript: growing turns are updated, not frozen at the first f
   ws.send(JSON.stringify({ interaction_type: "update_only", transcript: [{ role: "user", content: "Zone six, our water" }] }));
   const full = [{ role: "user", content: "Zone six, our water pressure dropped to nothing, no one is hurt." }];
   ws.send(JSON.stringify({ interaction_type: "response_required", response_id: 1, transcript: full }));
-  const resp = await once(ws, (m) => m.response_type === "response");
+  const resp = await once(ws, (m) => m.response_type === "response" && m.response_id !== 0);
   const turns = ctx.store.turns.filter((t) => t.call_id === "call_stream");
   assert.equal(turns.length, 1);
   assert.equal(turns[0].text_original, full[0].content);
@@ -166,3 +166,9 @@ test("Spanish caller gets Spanish replies and the Spanish card with no language 
   tr.push({ role: "user", content: "No, nadie está herido." });
   const r2 = await talk(ws, tr, 2); assert.doesNotMatch(r2.content, /\b(the|you|zone)\b/i);
 }));
+
+test("the line greets first and says it is automated", async () => {
+  const { GREETING } = await import("../retell_ws.js");
+  assert.match(GREETING, /automated assistant/);
+  assert.match(GREETING, /person/);
+});

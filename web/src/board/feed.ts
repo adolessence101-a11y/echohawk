@@ -5,6 +5,8 @@ export const FEED_COLOR: Record<string, string> = {
   packet_created: "var(--watch)", incident_opened: "var(--watch)", rung_changed: "var(--hand)", trigger_fired: "var(--hand)", incident_spread: "var(--ask)",
   scan_flagged: "var(--ask)", units_dispatched: "var(--ok)", call_flagged: "var(--machine)", transfer_started: "var(--ok)", kit_shown: "var(--muted)",
   callback_no_answer: "var(--ask)", dispatcher_joined: "var(--ok)", dispatcher_said: "var(--muted)",
+  unit_status: "var(--teal)", incident_disposition: "var(--muted)",
+  alert_sent: "var(--ask)", alert_requested: "var(--ask)", alert_cancelled: "var(--muted)", alert_ack: "var(--ok)",
 };
 export const FEED_TYPES = new Set(Object.keys(FEED_COLOR));
 
@@ -27,6 +29,12 @@ export function feedLine(ev: EventRow, byId: Record<string, Incident>): { where:
     case "callback_no_answer": return { where, text: "callback not answered" };
     case "dispatcher_joined": return { where: "", text: "dispatcher joined a live call" };
     case "dispatcher_said": return { where: "", text: "dispatcher spoke on a live call" };
+    case "unit_status": return { where, text: `${String(p.unit || "").toUpperCase()} ${String(p.status || "").replace("_", " ")}` };
+    case "incident_disposition": return { where, text: `closed: ${String(p.disposition || "").replace(/_/g, " ")}` };
+    case "alert_sent": return { where: (p.zones || []).join(", "), text: `public alert sent: ${String(p.kind || "").replace(/_/g, " ")} (${p.by?.agency || ""})` };
+    case "alert_requested": return { where: (p.zones || []).join(", "), text: `asked agencies for: ${String(p.kind || "").replace(/_/g, " ")}` };
+    case "alert_cancelled": return { where: "", text: "public alert lifted" };
+    case "alert_ack": return { where: "", text: p.status === "need_help" ? "resident replied: NEED HELP" : p.status === "safe" ? "resident replied: safe" : "resident replied: left the area" };
     default: return { where: "", text: ev.event_type };
   }
 }

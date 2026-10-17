@@ -7,7 +7,8 @@ export const TYPES = { directive: 0, checkin: 1, sos: 2, ack: 3 };
 export const EPOCH_MS = Date.UTC(2025, 0, 1);
 export const TARGET_CODES = ["unknown", "power", "water", "gas", "power_line", "structure_fire", "wildfire", "road", "flood", "person", "vehicle"];
 export const ACTION_CODES = ["unknown", "dispatch_ems", "dispatch_fire", "dispatch_police", "welfare_check", "info_only", "deflect_311", "shelter_in_place", "evacuate", "all_clear"];
-export const LANG_CODES = ["en", "es", "ko", "zh", "tl", "hy", "vi", "fa"];
+// 4-bit field: the original 8 keep their codes; the other 7 of the 15 recognized languages follow (index 15 = unknown)
+export const LANG_CODES = ["en", "es", "ko", "zh", "tl", "hy", "vi", "fa", "ru", "ar", "ja", "hi", "th", "uk", "yue"];
 
 export function encodeFrame({ type, zone, target, severity, action, language, issuedAtMs = Date.now(), sequence }, key) {
   const b = Buffer.alloc(16);

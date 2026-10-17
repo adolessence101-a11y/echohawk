@@ -137,3 +137,23 @@ svg.links line { stroke: var(--ask); stroke-width: 6; stroke-linecap: round; str
 .soacts { padding: 0 18px 10px; border-bottom: 1px solid var(--line) }
 .livetag { display: flex; align-items: center; gap: 7px; font-size: 13px; font-weight: 500; color: #dbe2ec !important; font-variant-numeric: tabular-nums } .livetag i { width: 8px; height: 8px; border-radius: 50%; background: var(--hand); animation: blink 1.4s infinite }
 @media (max-width: 1150px) { .lower.three { grid-template-columns: 1fr } }
+.pubbtn { font-size: 12.5px; padding: 5px 11px; border-color: rgba(242,180,60,.55); color: #ffd58a; background: rgba(242,180,60,.07) }
+.drawer .pubbtn { margin-top: 10px }
+.acomp { margin: auto; width: min(620px, 94vw); max-height: 92vh; overflow: auto; background: var(--panel); border: 1px solid var(--line2); border-radius: 14px; box-shadow: 0 30px 80px rgba(0,0,0,.6); animation: tin .2s ease-out; display: flex; flex-direction: column }
+.slideover:has(.acomp) { justify-content: center; align-items: center }
+.amodes { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; padding: 14px 18px 0 }
+.amodes button { text-align: left; padding: 12px; background: #151f2e; border-color: var(--line2) } .amodes b { display: block; font-size: 14px } .amodes span { display: block; font-size: 12px; color: var(--muted); margin-top: 4px; line-height: 1.4 }
+.amodes button.on { border-color: var(--teal); background: rgba(60,199,180,.08) } .amodes button.on:last-child { border-color: var(--ask); background: rgba(242,180,60,.08) }
+.akinds { display: flex; gap: 6px; padding: 12px 18px 0 } .akinds button { font-size: 12.5px; background: transparent } .akinds button.on { background: var(--ask); border-color: var(--ask); color: #2a1c00 }
+.alab { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .7px; padding: 14px 18px 6px; display: flex; justify-content: space-between } .alab span { text-transform: none; letter-spacing: 0 }
+.azones { display: grid; grid-template-columns: repeat(8, 1fr); gap: 5px; padding: 0 18px } .azones button { font-size: 12px; padding: 6px 0; background: #121a26 } .azones button.on { background: rgba(242,180,60,.18); border-color: var(--ask); color: #ffe2a6 }
+.acomp textarea { margin: 0 18px; font: inherit; background: #10131a; color: var(--text); border: 1px solid var(--line2); border-radius: 8px; padding: 10px; resize: vertical }
+.afoot { display: flex; align-items: center; gap: 10px; padding: 14px 18px 18px } .afoot span { flex: 1 } .afoot button { padding: 9px 18px }
+.btn-amber { background: var(--ask); border-color: var(--ask); color: #2a1c00; font-weight: 700 }
+.lower.three { grid-template-columns: 1fr 1fr }
+.overcount { font-size: 12px; background: rgba(229,72,77,.18); color: #ff8c8f; border-radius: 999px; padding: 1px 9px; animation: blink 1.4s infinite }
+.urow { display: flex; align-items: center; gap: 12px; padding: 10px 18px; border-bottom: 1px solid var(--line); cursor: pointer } .urow:hover { background: #162030 }
+.urow > b { font-size: 11px; letter-spacing: .6px; padding: 3px 7px; border-radius: 5px; background: #24324a; min-width: 62px; text-align: center }
+.urow.over { background: rgba(229,72,77,.08) } .urow.over > b { background: var(--hand); color: #fff } .urow.over .lcm span { color: #ff9d9d }
+.unext { display: flex; gap: 4px } .unext button { font-size: 11.5px; padding: 3px 9px }
+.closeas { font-size: 12px; padding: 5px 8px; background: #121a26; color: var(--text); border: 1px solid var(--line2); border-radius: 7px }

@@ -3,12 +3,15 @@ import { api, token } from "../shared/api";
 import type { Call, EventRow, Health, Incident, OpenCallback, Unit, ZoneWindow } from "../shared/types";
 import { useEvents, useRefresher } from "../shared/sse";
 import { ago, duration, hms, useTick } from "../shared/time";
-import { DeployBar, Toasts, UnitChips, useToasts } from "../shared/ui";
+import { DeployBar, Toasts, useToasts } from "../shared/ui";
 import { LiveCall, langName } from "../shared/LiveCall";
 import { AppHeader, Icon, SUPERVISOR_TABS } from "../shared/Brand";
 import { rdOf } from "../shared/laMap";
 import { isMachineOnly, plainReason, suggest, tName, trig } from "../shared/labels";
 import { ZoneGrid } from "./ZoneGrid";
+import { UnitPill, STATUS_LABEL, mmss } from "../shared/Units";
+import type { UnitRow, UnitStatus } from "../shared/types";
+import { AlertComposer } from "./AlertComposer";
 import { MapView } from "./MapView";
 import { describe, mergeAlert, PRIO, type Alert, type HistEntry } from "./alerts";
 import { FEED_TYPES, feedLine } from "./feed";
@@ -48,6 +51,10 @@ export function Board() {
   const [joinedCalls, setJoinedCalls] = useState<Set<string>>(new Set());
   const [version, setVersion] = useState(0);
   const [demoCall, setDemoCall] = useState(false);
+  const [compose, setCompose] = useState<{ zones: string[]; hazard: string } | null>(null);
+  const [units, setUnits] = useState<UnitRow[]>([]);
+  const [watchdog, setWatchdog] = useState<Record<string, number>>({});
+  const [dispositions, setDispositions] = useState<Record<string, string>>({});
   const toasts = useToasts();
   useTick();
   const [win, setWin] = useState<ZoneWindow[]>([]);
@@ -76,7 +83,8 @@ export function Board() {
   incRef.current = byId;
 
   const refresh = async () => {
-    const [a, b, c, e, f] = await Promise.allSettled([api.incidents(), api.windows(), api.health(), api.callbacks(), api.calls()]);
+    const [a, b, c, e, f, g] = await Promise.allSettled([api.incidents(), api.windows(), api.health(), api.callbacks(), api.calls(), api.units()]);
+    if (g.status === "fulfilled") { setUnits(g.value.units); setWatchdog(g.value.watchdog_s); setDispositions(g.value.dispositions); }
     if (f.status === "fulfilled" && Array.isArray(f.value)) setCalls(f.value);
     setVersion((v) => v + 1);
     if (a.status === "fulfilled" && Array.isArray(a.value)) { setInc(a.value); incRef.current = Object.fromEntries(a.value.map((i) => [i.id, i])); }
@@ -154,7 +162,8 @@ export function Board() {
     return r.every((x) => x.ok);
   };
   const ack = async (id: string) => { await api.ack(TOK, id); setAcked((s) => new Set(s).add(id)); };
-  const closeInc = async (id: string) => { const r = await api.close(TOK, id, "supervisor closed from board"); if (!r.ok) setCloseErr((e) => ({ ...e, [id]: r.data.error || "Could not close" })); else setSel(null); refresh(); };
+  const closeAs = async (id: string, code: string) => { if (!code) return; const r = await api.disposition(TOK, id, code); if (!r.ok) setCloseErr((e) => ({ ...e, [id]: r.data.error || "Could not close" })); else { setSel(null); toasts.push(code === "unable_to_locate" ? "Closed. A callback to the caller is scheduled (silence panel)." : `Closed: ${dispositions[code]}`); } refresh(); };
+  const setUnit = async (incId: string, n: number, status: UnitStatus) => { const r = await api.unitStatus(TOK, incId, n, status); if (!r.ok) toasts.push(r.data.error || "Could not update", true); refresh(); };
   const closeAlert = (key: string, how: "dismissed" | "acknowledged") => {
     const a = alerts.find((x) => x.key === key);
     setAlerts((l) => l.filter((x) => x.key !== key));
@@ -181,6 +190,7 @@ export function Board() {
       <AppHeader tabs={SUPERVISOR_TABS} current="overview" role="Supervisor" online={stream === "live"}
         right={<>
           <button className="bellbtn" title={soundOn ? "Alert sound on" : "Click anywhere to turn on alert sound"} onClick={() => setMinimized(false)}>{Icon.bell(alerts.length ? "#f2b43c" : "#8d9aae")}{alerts.length > 0 && <span className="n">{alerts.length}</span>}</button>
+          <button className="btn-ghost pubbtn" onClick={() => setCompose({ zones: [], hazard: "" })}>📣 Public alert</button>
           <button className="btn-ghost surgebtn" disabled={surging} onClick={surge}>{surging ? "Demo running…" : "▶ Run demo surge"}</button>
         </>} />
 
@@ -250,13 +260,15 @@ export function Board() {
                   <div className="dtop"><span className="muted small">First report {ago(selInc.first_report_at)} ago{selInc.zone_id !== rdOf(selInc.zone_id) ? ` · demo zone ${selInc.zone_id}` : ""}</span></div>
                   <div className="dstats"><span><b>{selInc.packet_ids.length}</b> calls → <b>1</b> line</span><span><b>{selInc.independent_count}</b> independent</span>{!!selInc.machine_count && <span><b>{selInc.machine_count}</b> machine</span>}<span>confidence* <b>{Number(selInc.score).toFixed(2)}</b>{selInc.trend === "rising" ? " ↑" : ""}</span></div>
                   <div className="why">{closeErr[selInc.id] || (isMachineOnly(selInc) ? "Only alarm activations so far. Likely one cause (power or wind), not separate emergencies. Confirm one address first." : plainReason(selInc.last_reason))}</div>
-                  <div className="chips">{(selInc.triggers || []).map((t) => <span key={t} className="chip trig">heard: {trig(t)}</span>)}<UnitChips dispatched={selInc.dispatched} />{acked.has(selInc.id) && <span className="chip">seen by supervisor</span>}</div>
+                  <div className="chips">{(selInc.triggers || []).map((t) => <span key={t} className="chip trig">heard: {trig(t)}</span>)}{acked.has(selInc.id) && <span className="chip">seen by supervisor</span>}</div>
+                  {(selInc.dispatched || []).length > 0 && <div className="units">{(selInc.dispatched || []).map((d, n) => <UnitPill key={n} d={d} n={n} limit={watchdog[d.status || "assigned"]} onSet={(k, st) => setUnit(selInc.id, k, st)} />)}</div>}
                   <div className="dacts">
                     <DeployBar withCallback={false} dispatched={selInc.dispatched} suggested={suggest(undefined, selInc.target)} onSend={(u) => deploy([selInc.id], u)} />
                     <span className="spacer" />
-                    {liveCallFor(selInc.id) && <button className="listenbtn" onClick={() => setListen(liveCallFor(selInc.id)!.id)}>{Icon.phone("#3cc7b4", 14)} Listen to the live call</button>}
+                    <button className="pubbtn" onClick={() => setCompose({ zones: [selInc.zone_id], hazard: tName(selInc.target) })}>📣 Alert residents</button>
+                {liveCallFor(selInc.id) && <button className="listenbtn" onClick={() => setListen(liveCallFor(selInc.id)!.id)}>{Icon.phone("#3cc7b4", 14)} Listen to the live call</button>}
                 <button onClick={() => ack(selInc.id)} disabled={acked.has(selInc.id)}>{acked.has(selInc.id) ? "Seen" : "Mark seen"}</button>
-                    <button onClick={() => closeInc(selInc.id)}>Close</button>
+                    <select className="closeas" value="" onChange={(e) => closeAs(selInc.id, e.target.value)}><option value="">Close as…</option>{Object.entries(dispositions).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select>
                   </div>
                 </div>
                     </td></tr>
@@ -318,6 +330,18 @@ export function Board() {
             ))}
           </div>
         </section>
+        <section className="panel" id="units"><div className="ptitle">Units in the field<span className="livecount">{units.length}</span>{units.some((u) => u.overdue) && <span className="overcount">{units.filter((u) => u.overdue).length} overdue</span>}</div>
+          <div className="lcl">
+            {!units.length && <div className="muted lcempty">No units out. Units appear here when someone taps Send.</div>}
+            {units.map((u) => (
+              <div key={u.incident_id + u.n} className={`urow ${u.overdue ? "over" : ""}`} onClick={() => setSel(u.incident_id)}>
+                <b>{u.unit.toUpperCase()}</b>
+                <div className="lcm"><b>District {rdOf(u.zone_id)} · {tName(u.target)}</b><span>{STATUS_LABEL[u.status]} for {mmss(u.seconds)}{u.limit_s ? ` · check at ${mmss(u.limit_s)}` : ""}{u.overdue ? " · OVERDUE, check on this unit" : ""}</span></div>
+                <span className="unext" onClick={(e) => e.stopPropagation()}>{u.next.filter((x) => x !== "cancelled").map((x) => <button key={x} onClick={() => setUnit(u.incident_id, u.n, x)}>{STATUS_LABEL[x]}</button>)}</span>
+              </div>
+            ))}
+          </div>
+        </section>
         <section className="panel"><div className="ptitle">Alert history</div>
           <div className="feed">
             {!hist.length && <div className="muted">No alerts yet.</div>}
@@ -351,6 +375,7 @@ export function Board() {
           </div>
         </div>
       )}
+      {compose && <AlertComposer tok={TOK} initialZones={compose.zones} initialHazard={compose.hazard} onClose={() => setCompose(null)} toast={toasts.push} />}
       <Toasts items={toasts.items} />
     </div>
   );

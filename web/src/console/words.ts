@@ -1,7 +1,7 @@
 import type { Item } from "./items";
 import { tName, trig } from "../shared/labels";
 
-export const FLAGS: [string, string][] = [["wrong_zone", "Wrong zone"], ["wrong_category", "Wrong category"], ["caller_distressed", "Caller distressed"], ["language_issue", "Language issue"]];
+export const FLAGS: [string, string][] = [["wrong_zone", "Wrong zone"], ["wrong_category", "Wrong category"], ["caller_distressed", "Caller distressed"], ["language_issue", "Language issue"], ["needs_interpreter", "Needs a human interpreter"]];
 
 // Engine reasons are written for the audit log; say the same thing in plain words on the wall.
 export function human(it: Item): string {

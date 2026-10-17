@@ -5,6 +5,24 @@ import { WebSocketServer } from "ws";
 import { config } from "./config.js";
 import { scanTurn } from "./triggers.js";
 import { extractFields, agentReply, translate, detectLanguage, nextFallbackLine } from "./llm.js";
+import { LANG } from "./languages.js";
+
+// Short system lines in the caller's language: English and Spanish are fixed text; the other 13 are translated by the
+// model once and cached, with English as the fallback if translation is slow or unavailable.
+const LINES = {
+  connect: { en: "I'm connecting you to a dispatcher right now. Stay on the line.", es: "Le estoy conectando con un despachador ahora mismo. No cuelgue." },
+  takeover: { en: "A dispatcher is on the line with you now. Keep talking, we can hear you.", es: "Un despachador está en la línea con usted ahora. Siga hablando, le escuchamos." },
+};
+const lineCache = new Map();
+export const GREETING = "You've reached EchoHawk, the city's overflow line. I'm an automated assistant, and a person can join any time, just say person. Para español, hable en español. Where are you right now?";
+async function lineIn(key, lang) {
+  const l = LINES[key]; if (l[lang]) return l[lang];
+  if (!LANG[lang]) return l.en;
+  const ck = key + ":" + lang; if (lineCache.has(ck)) return lineCache.get(ck);
+  const tr = await Promise.race([translate(l.en, lang, "en"), new Promise((r) => setTimeout(() => r(null), 2500))]).catch(() => null);
+  if (tr && !tr.startsWith(`[${lang}]`)) { lineCache.set(ck, tr); return tr; }
+  return l.en;
+}
 import { config as _cfg } from "./config.js";
 import { makePacket } from "./schema.js";
 import { showKitCard, kitForFields } from "./kits.js";
@@ -31,6 +49,9 @@ export class RetellHub {
     if (!this.store.calls.find((c) => c.id === callId)) this.store.calls.push({ id: callId, started_at: s.startedAt, ended_at: null, language: "und", direction: "inbound", mode: "tuesday", status: "active", transfer_path: "none", dispatcher_id: null });
     this.store.appendEvent({ event_type: "call_started", call_id: callId, actor: "system", provenance: "firsthand", payload_json: {} });
     this.send(ws, { response_type: "config", config: { auto_reconnect: true, call_details: true, transcript_with_tool_calls: true } });
+    // speak first and say what this is: an automated line, a person can join any time (the New Orleans lesson: callers
+    // were not told they were talking to AI). Response id 0 is Retell's slot for the opening line.
+    this.send(ws, { response_type: "response", response_id: 0, content: GREETING, content_complete: true });
     ws.on("message", (raw) => this.onMessage(s, raw).catch((e) => console.error("ws handler error", e)));
     ws.on("close", () => { this.sessions.delete(callId); const c = this.store.calls.find((x) => x.id === callId); if (c && !c.ended_at) { c.ended_at = new Date().toISOString(); c.status = c.status === "transferred" ? c.status : "ended"; } this.store.appendEvent({ event_type: "call_ended", call_id: callId, actor: "system", provenance: "firsthand", payload_json: {} }); this.store.save(); });
   }
@@ -88,7 +109,10 @@ export class RetellHub {
     const lastUser = [...s.transcript].reverse().find((t) => t.role === "user")?.content || "";
     // language from the caller's own words; sticky once Spanish is heard
     const lang = detectLanguage(s.transcript.filter((t) => t.role === "user").map((t) => t.content).join(" "), s.callerLang);
-    if (lang !== s.callerLang) { s.callerLang = lang; const c = this.store.calls.find((x) => x.id === s.callId); if (c) c.language = lang; this.store.appendEvent({ event_type: "language_detected", call_id: s.callId, actor: "system", provenance: "firsthand", payload_json: { language: lang } }); }
+    if (lang !== s.callerLang) { s.callerLang = lang; const c = this.store.calls.find((x) => x.id === s.callId); if (c) c.language = lang; this.store.appendEvent({ event_type: "language_detected", call_id: s.callId, actor: "system", provenance: "firsthand", payload_json: { language: lang } });
+      // recognized but no matching voice (Cantonese today): put the call in front of a person with an interpreter
+      if (LANG[lang] && !LANG[lang].speaks && c && !(c.flags || []).some((f) => f.flag === "needs_interpreter")) { c.flags = [...(c.flags || []), { flag: "needs_interpreter", at: new Date().toISOString(), by: "system" }]; this.store.appendEvent({ event_type: "call_flagged", call_id: s.callId, actor: "system", provenance: "firsthand", payload_json: { flag: "needs_interpreter", language: lang } }); }
+    }
     const triggers = scanTurn(lastUser);
 
     // 1) hard trigger: transfer first, card in parallel, never one gating the other
@@ -99,7 +123,7 @@ export class RetellHub {
       if (kitId) { const shown = showKitCard({ kit_id: kitId, zone_id: s.fields?.zone_id, call_id: s.callId, language: s.callerLang }, this.store, "ai"); if (shown.ok) { kitScript = shown.script_lines; this.send(s.ws, { response_type: "metadata", metadata: { show_kit_card: shown } }); } }
       this.store.appendEvent({ event_type: "trigger_fired", call_id: s.callId, actor: "system", provenance: "firsthand", payload_json: { triggers: triggers.hard, kit_id: kitId } });
       await this.ensurePacket(s, { triggers, force: true });
-      const line = kitScript ? kitScript.join(" ") : (s.callerLang === "es" ? "Le estoy conectando con un despachador ahora mismo. No cuelgue." : "I'm connecting you to a dispatcher right now. Stay on the line.");
+      const line = kitScript ? kitScript.join(" ") : await lineIn("connect", s.callerLang);
       this.send(s.ws, { response_type: "response", response_id: msg.response_id, content: line, content_complete: true, ...this.transferDirective(s) });
       return;
     }
@@ -177,7 +201,7 @@ export class RetellHub {
     const s = this.sessions.get(callId); if (!s) return { ok: false, status: 404 };
     this.join(callId, dispatcherId);
     const c = this.store.calls.find((x) => x.id === callId); if (c) { c.status = "transferred"; c.transfer_path = "console_takeover"; }
-    const line = s.callerLang === "es" ? "Un despachador está en la línea con usted ahora. Siga hablando, le escuchamos." : "A dispatcher is on the line with you now. Keep talking, we can hear you.";
+    const line = await lineIn("takeover", s.callerLang);
     s.interruptSeq += 1;
     this.send(s.ws, { response_type: "agent_interrupt", interrupt_id: s.interruptSeq, content: line, content_complete: true, no_interruption_allowed: false });
     this.store.appendEvent({ event_type: "transfer_started", call_id: callId, actor: "dispatcher", provenance: "firsthand", payload_json: { path: "console_takeover" } });

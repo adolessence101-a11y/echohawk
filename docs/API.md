@@ -1,6 +1,7 @@
 # EchoHawk API Reference
 
-Auth is a Bearer token (or `?token=` query param). Roles: **supervisor**, **dispatcher**, **anon** (no token).
+Auth is a Bearer token (or `?token=` query param). Roles: **agency** (`AGENCY_TOKEN`, returned by `/agency/login`), **supervisor**, **dispatcher**, **anon** (no token).
+Agency and supervisor requests may add `x-agency: <agency id>` and `x-operator: <name>` headers; these become the drafter and approver names on public alerts.
 
 ---
 
@@ -16,6 +17,11 @@ Auth is a Bearer token (or `?token=` query param). Roles: **supervisor**, **disp
 | GET | `/incidents/:id` | anon | — | incident + `packets[]` + `events[]` | — |
 | POST | `/incidents/:id/ack` | dispatcher | — | `{ ok }` | `acknowledged_by_human` |
 | POST | `/incidents/:id/close` | dispatcher | `{ reason? }` | `{ ok }` or error | `incident_closed` |
+| POST | `/incidents/:id/dispatch` | dispatcher | `{ units: ems\|fire\|police\|utility\|callback (or array), note? }` | `{ ok, dispatched[] }`, each unit starts `assigned` | `units_dispatched` |
+| POST | `/incidents/:id/units/:n/status` | dispatcher | `{ status }`: assigned → en_route → on_scene → cleared, or cancelled from assigned/en_route; a skip returns 409 | `{ ok, unit }` | `unit_status` |
+| POST | `/incidents/:id/disposition` | dispatcher | `{ disposition, note? }`: resolved, report_taken, referred, unfounded, duplicate, unable_to_locate | `{ ok, disposition, callback_id }`; closes the incident, clears units, `unable_to_locate` schedules a callback | `incident_closed`, `incident_disposition` |
+| GET | `/units` | anon | — | `{ units[]: { incident_id, zone_id, target, n, unit, status, seconds, limit_s, overdue, next[] }, watchdog_s, dispositions }`, overdue first | — |
+| GET | `/my/updates` | anon | `?device&zone` | updates on that device's own reports: `[{ incident_id, units[], disposition, message, updated_at }]` | — |
 | POST | `/incidents/:id/callback` | anon | `{ attempt_no? }` | callback row `{ id, incident_id, attempt_no, result, … }` | `callback_scheduled` |
 | GET | `/zones/windows` | anon | — | last 2 000 zone-window records | — |
 | POST | `/callbacks/:id/result` | anon | `{ result }` — one of `answered`, `no_answer`, `busy` | `{ ok, callback }` | `callback_no_answer` (+ schedules next if `< 3`); re-schedules via `callback_scheduled` |
@@ -26,6 +32,20 @@ Auth is a Bearer token (or `?token=` query param). Roles: **supervisor**, **disp
 | POST | `/calls/:id/say` | dispatcher | `{ text, lang_from? }` | `{ ok, sent_text, lang_to }` | `dispatcher_said` |
 | POST | `/calls/:id/language` | anon | `{ lang }` | `{ ok }` | — |
 | POST | `/calls/:id/kit` | dispatcher | `{ kit_id }` (omit to close) | `{ ok }` or kit card | `kit_changed_by_human` |
+| POST | `/calls/:id/takeover` | dispatcher | — | `{ ok }`; the AI stops and the line goes to a person | `transfer_started` |
+| POST | `/calls/:id/flag` | dispatcher | `{ flag }` e.g. `wrong_zone`, `wrong_severity`, `needs_interpreter`, `review` | `{ ok, flags[] }` | `call_flagged` |
+| POST | `/demo/call` | anon | `{ scenario? }`: spanish_water (default), spanish, water, bleeding, breathing | `{ ok, scenario, hold_seconds: 180 }` (202) | `call_started`, `turn_added` |
+| POST | `/demo/surge` | anon | — | `{ ok, calls: 20 }` (202) | the 20-call script |
+| GET | `/languages` | anon | — | 15 rows `{ code, name, native, retell, speaks }` | — |
+| GET | `/phrasebook` | anon | `?lang=` | `{ lang, machine, phrases }`: what a phone says for each signed directive, cached offline | — |
+| GET | `/agencies` | anon | — | `{ agencies[], kinds }` | — |
+| POST | `/agency/login` | anon | `{ agency, name, passcode }` | `{ ok, token, agency, name }` or 401 | `agency_login`, `agency_login_failed` |
+| GET | `/broadcasts` | supervisor | — | all public alerts, newest first | — |
+| POST | `/broadcasts` | agency or supervisor | `{ kind, zones[], message (≤360), hazard?, instructions?, channels?, request? }` | `{ ok, broadcast }` (201). Supervisor: advisory sends at once; a protective kind needs `request: true` and lands as `requested` | `alert_drafted` or `alert_requested` (+ `alert_sent`) |
+| POST | `/broadcasts/:id/send` | agency or supervisor | — | `{ ok, broadcast }`; protective kinds need an agency approver who is not the drafter (409 otherwise); `all_clear` lifts overlapping active alerts | `alert_sent`, then `alert_translated` |
+| POST | `/broadcasts/:id/cancel` | agency or supervisor | `{ reason? }` | `{ ok, broadcast }` | `alert_cancelled` |
+| GET | `/broadcasts/active` | anon | `?zone&lang` | active alerts for that zone in that language, each with `frame_b64` | — |
+| POST | `/broadcasts/:id/ack` | anon | `{ status: safe\|need_help\|left, zone?, device?, lang? }` | `{ ok, incident_id? }`; `need_help` with a zone opens a "needs a person" incident | `alert_ack` (+ `packet_ingested`) |
 | GET | `/events/stream` | anon | — | SSE stream (see below) | — |
 | GET | `/events` | anon | — | last 500 event rows | — |
 | GET | `/kits` | anon | — | full kit catalog array | — |
@@ -67,6 +87,16 @@ Connect with `Accept: text/event-stream`. One `event: hello` frame is sent immed
 | `retell_call_started` | Retell webhook `call_started` event |
 | `retell_call_ended` | Retell webhook `call_ended` event |
 | `retell_call_analyzed` | Retell webhook `call_analyzed` event |
+| `call_flagged` | Dispatcher flagged an AI call, or the caller's language needs a human interpreter |
+| `units_dispatched` | Units sent to an incident |
+| `unit_status` | A unit moved to en route, on scene, cleared or cancelled |
+| `incident_disposition` | Incident closed with a disposition code |
+| `alert_drafted` / `alert_requested` | Public alert saved by an agency, or requested by the supervisor |
+| `alert_sent` | Public alert approved and sent |
+| `alert_translated` | Machine translations of a sent alert are ready |
+| `alert_cancelled` | Public alert lifted |
+| `alert_ack` | A resident answered an alert |
+| `agency_login` / `agency_login_failed` | Agency sign-in |
 
 ---
 
@@ -89,6 +119,7 @@ Retell opens the connection; EchoHawk is the server.
 | `response_type` | Key fields | When sent |
 |-----------------|------------|-----------|
 | `config` | `{ auto_reconnect, call_details, transcript_with_tool_calls }` | Once on connection open |
+| `response` (id 0) | `content`: the greeting, which says the line is automated and that a person can join | Right after `config` |
 | `ping_pong` | `timestamp` | Reply to every `ping_pong` |
 | `response` | `response_id`, `content`, `content_complete: true`, optional `transfer_number` | Reply to `response_required` / `reminder_required` |
 | `agent_interrupt` | `interrupt_id`, `content`, `content_complete: true`, `no_interruption_allowed: false` | **Interpreter Mode only** — dispatcher text injected via `/calls/:id/say` |

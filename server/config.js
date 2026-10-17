@@ -11,6 +11,7 @@ export const config = {
   tokens: {
     dispatcher: process.env.DISPATCHER_TOKEN || "dev-dispatcher",
     supervisor: process.env.SUPERVISOR_TOKEN || "dev-supervisor",
+    agency: process.env.AGENCY_TOKEN || "dev-agency",          // alerting agencies (OEM, Sheriff, Fire, LAPD, LAFD, EMD)
   },
   // Claude (Anthropic Messages API) when ANTHROPIC_API_KEY is set; otherwise any OpenAI-compatible endpoint; otherwise rules.
   get llm() {

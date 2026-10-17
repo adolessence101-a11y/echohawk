@@ -4,7 +4,7 @@ import { resolve } from "node:path";
 
 // Three screens, one workspace. The Node server serves web/dist and proxies nothing:
 // in dev, `npm run dev` proxies the API to the running EchoHawk server on 8787.
-const API = ["/incidents", "/calls", "/zones", "/events", "/cost", "/health", "/callbacks", "/kits", "/demo", "/replay/run", "/replay/days", "/geo", "/vendor"];
+const API = ["/incidents", "/calls", "/zones", "/events", "/cost", "/health", "/callbacks", "/kits", "/demo", "/replay/run", "/replay/days", "/geo", "/vendor", "/broadcasts", "/agencies", "/agency", "/languages", "/phrasebook", "/packets"];
 export default defineConfig({
   plugins: [react()],
   build: {
@@ -15,6 +15,8 @@ export default defineConfig({
         board: resolve(__dirname, "board/index.html"),
         console: resolve(__dirname, "console/index.html"),
         replay: resolve(__dirname, "replay/index.html"),
+        alerts: resolve(__dirname, "alerts/index.html"),
+        app: resolve(__dirname, "app/index.html"),
       },
     },
   },

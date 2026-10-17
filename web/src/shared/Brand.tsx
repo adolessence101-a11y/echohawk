@@ -18,6 +18,7 @@ export const SUPERVISOR_TABS: Tab[] = [
   { key: "overview", label: "Overview", href: "/board" },
   { key: "calls", label: "Live calls", href: "/console" },
   { key: "replay", label: "Replay", href: "/replay" },
+  { key: "alerts", label: "Public alerts", href: "/alerts" },
 ];
 
 // Top bar from the interface concept: mark, wordmark, tabs, system status, role menu.
@@ -28,7 +29,7 @@ export function AppHeader({ tabs, current, role, online, right }: { tabs: Tab[];
     <header className="apphead">
       <a className="mark" href={`/board${q}`}><Logo /><span>EchoHawk</span></a>
       <nav className="tabsnav">
-        {tabs.map((t) => <a key={t.key} href={t.key === "replay" ? t.href : t.href + q} className={t.key === current ? "on" : ""}>{t.label}</a>)}
+        {tabs.map((t) => <a key={t.key} href={t.key === "replay" || t.key === "alerts" ? t.href : t.href + q} className={t.key === current ? "on" : ""}>{t.label}</a>)}
       </nav>
       <span className="spacer" />
       {right}

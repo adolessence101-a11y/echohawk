@@ -3,17 +3,18 @@ import { api, token } from "../shared/api";
 import type { Call, Incident, Kit, Packet, Unit } from "../shared/types";
 import { useEvents, useRefresher } from "../shared/sse";
 import { duration, hms, useTick } from "../shared/time";
-import { DeployBar, Toasts, UnitChips, useToasts } from "../shared/ui";
+import { DeployBar, Toasts, useToasts } from "../shared/ui";
 import { AppHeader, Icon, SUPERVISOR_TABS } from "../shared/Brand";
 import { LiveCall } from "../shared/LiveCall";
+import { UnitPill } from "../shared/Units";
+import type { UnitStatus } from "../shared/types";
 import { rdOf } from "../shared/laMap";
 import { RUNG_LABEL, suggest, tName, trig, unitLabel } from "../shared/labels";
 import { buildItems, type Item } from "./items";
 import { FLAGS, anyoneHurt, human } from "./words";
 
 const TOK = token("dev-dispatcher");
-const LANG: Record<string, string> = { en: "English", es: "Spanish" };
-const langName = (l?: string) => LANG[l || ""] || "Language not set";
+import { langName, langNative } from "../shared/languages";
 const district = (z?: string | null) => (z ? `Zone ${rdOf(z)}` : "Zone ?");
 
 function kitIcon(k: Kit) {
@@ -40,11 +41,13 @@ export function Console() {
   const [flagOpen, setFlagOpen] = useState(false);
   const [sim, setSim] = useState(false);
   const [version, setVersion] = useState(0);
+  const [watchdog, setWatchdog] = useState<Record<string, number>>({});
   const toasts = useToasts();
   useTick();
 
   const refresh = async () => {
-    const [c, i] = await Promise.allSettled([api.calls(), api.incidents()]);
+    const [c, i, u] = await Promise.allSettled([api.calls(), api.incidents(), api.units()]);
+    if (u.status === "fulfilled") setWatchdog(u.value.watchdog_s);
     if (c.status === "fulfilled" && Array.isArray(c.value)) setCalls(c.value);
     if (i.status === "fulfilled" && Array.isArray(i.value)) setIncs(i.value);
     setVersion((v) => v + 1);
@@ -150,7 +153,7 @@ export function Console() {
                   <div key={x.id} className={`crow ${x.id === it?.id ? "on" : ""} ${x.lane === "need" ? "need" : ""}`} onClick={() => setSelected(x.id)}>
                     <span className="cic" style={{ background: x.id === it?.id && x.lane === "need" ? "#e5484d" : "transparent" }}>{Icon.phoneSolid(x.id === it?.id && x.lane === "need" ? "#fff" : rowColor(x), 20)}</span>
                     <div className="cmain">
-                      <div className="cl1">{x.kind === "call" ? langName(x.language) : "Caller report"} · {district(x.zone)}</div>
+                      <div className="cl1">{x.kind === "call" ? langName(x.language) : "Caller report"}{x.kind === "call" && x.language && x.language !== "en" && langNative(x.language) ? <span className="native"> {langNative(x.language)}</span> : null} · {district(x.zone)}</div>
                       <div className="cl2">{tName(x.target)}{x.triggers.length > 0 && <span className="dotred" title="life-safety words heard" />}{x.flags.length > 0 && <span className="flagmark">⚑</span>}{x.dispatched.length > 0 && <span className="sentmark">✓ sent</span>}{x.kind === "call" && x.status === "transferred" && x.live && <span className="sentmark">you have it</span>}</div>
                     </div>
                     <span className="ctime">{x.live ? <span className="livedot">● {duration(x.start)}</span> : hms(x.last_at || x.start).slice(0, 5)}</span>
@@ -190,8 +193,9 @@ export function Console() {
                   </span>
                 )}
               </div>
+              {it.incident_id && it.dispatched.length > 0 && <div className="units pad">{it.dispatched.map((d, n) => <UnitPill key={n} d={d} n={n} limit={watchdog[d.status || "assigned"]} onSet={async (k, st: UnitStatus) => { const r = await api.unitStatus(TOK, it.incident_id!, k, st); if (!r.ok) toasts.push(r.data.error || "Could not update", true); refresh(); }} />)}</div>}
               {(it.triggers.length > 0 || it.flags.length > 0 || it.dispatched.length > 0) && (
-                <div className="chips pad">{it.triggers.map((t) => <span key={t} className="chip trig">⚠ heard: {trig(t)}</span>)}{it.flags.map((f) => <span key={f} className="chip flag">⚑ {f.replace(/_/g, " ")}</span>)}<UnitChips dispatched={it.dispatched} /></div>
+                <div className="chips pad">{it.triggers.map((t) => <span key={t} className="chip trig">⚠ heard: {trig(t)}</span>)}{it.flags.map((f) => <span key={f} className="chip flag">⚑ {f.replace(/_/g, " ")}</span>)}</div>
               )}
               {it.kind === "call" ? (
                 <LiveCall call={{ id: it.id, language: it.language, live: it.live, status: it.status }} tok={TOK} version={version} joined={joined.has(it.id)}

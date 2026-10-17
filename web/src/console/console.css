@@ -49,3 +49,5 @@
 .cgroup span { color: var(--muted) }
 .demo-call { font-size: 12px; padding: 4px 10px; font-weight: 400 }
 .chat .livecall { flex: 1; min-height: 0 }
+.native { color: var(--muted); font-weight: 400 }
+.units.pad { padding: 8px 14px 0; margin: 0 }

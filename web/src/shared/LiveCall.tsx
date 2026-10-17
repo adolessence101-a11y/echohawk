@@ -4,8 +4,8 @@ import { api } from "./api";
 import type { Turn } from "./types";
 import { Icon } from "./Brand";
 
-const LANG: Record<string, string> = { en: "English", es: "Spanish" };
-export const langName = (l?: string) => LANG[l || ""] || "Language not set";
+import { LANGUAGES, langName } from "./languages";
+export { langName };
 const SR: any = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
 
 export interface LiveCallInfo { id: string; language?: string; live: boolean; status?: string }
@@ -52,7 +52,7 @@ export function LiveCall({ call, tok, version, joined, onJoined, onChanged, toas
   };
   const micDown = () => {
     if (!SR) return toast("Speech recognition is not available in this browser; type instead", true);
-    const r = new SR(); r.interimResults = false; r.lang = lang === "es" ? "es-MX" : "en-US";
+    const r = new SR(); r.interimResults = false; r.lang = ({ en: "en-US", es: "es-MX", zh: "zh-CN", yue: "zh-HK", ko: "ko-KR", fil: "fil-PH", hy: "hy-AM", vi: "vi-VN", fa: "fa-IR", ru: "ru-RU", ar: "ar-SA", ja: "ja-JP", hi: "hi-IN", th: "th-TH", uk: "uk-UA" } as Record<string, string>)[lang] || "en-US";
     r.onresult = (e: any) => send(e.results[0][0].transcript); rec.current = r; r.start(); setMic(true);
   };
 
@@ -89,7 +89,7 @@ export function LiveCall({ call, tok, version, joined, onJoined, onChanged, toas
       </div>
       <div className="composer">
         <span className="clip">{Icon.clip("#8d9aae")}</span>
-        <select value={lang} onChange={(e) => setLang(e.target.value)} title="The language you type in"><option value="en">EN</option><option value="es">ES</option></select>
+        <select value={lang} onChange={(e) => setLang(e.target.value)} title="The language you type in">{LANGUAGES.map((l) => <option key={l.code} value={l.code}>{l.code.toUpperCase()} · {l.name}</option>)}</select>
         <input value={say} onChange={(e) => setSay(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") send(); }} disabled={!call.live || !isJoined}
           placeholder={!call.live ? "This call has ended" : isJoined ? "Type a message to the caller..." : "Join interpreter to talk to the caller"} />
         <button className={`micbtn ${mic ? "on" : ""}`} disabled={!call.live || !isJoined} onMouseDown={micDown} onMouseUp={() => { rec.current?.stop(); setMic(false); }} title="Hold to talk">{Icon.mic(mic ? "#3cc7b4" : "#c2cbd8")}</button>

@@ -74,3 +74,11 @@ h2 { margin: 0; font-size: 12px; text-transform: uppercase; letter-spacing: 1px;
 .leaflet-control-scale-line { background: rgba(11,17,26,.7); color: #c2cbd8; border-color: #8d9aae }
 .leaflet-control-zoom a { background: #172131 !important; color: #e9eef5 !important; border-color: #2c3c54 !important }
 .leaflet-control-attribution { background: rgba(11,17,26,.7) !important; color: #6b7a90 !important } .leaflet-control-attribution a { color: #8d9aae !important }
+/* unit status pills (after dispatch) */
+.upill { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; padding: 3px 4px 3px 9px; border-radius: 999px; border: 1px solid var(--line2); background: #121a26; white-space: nowrap }
+.upill b { font-weight: 700 } .upill .ust { color: var(--muted) } .upill .utm { font-variant-numeric: tabular-nums; color: #c2cbd8 }
+.upill.en_route { border-color: rgba(76,156,240,.6) } .upill.en_route .ust { color: #9cc4ff } .upill.on_scene { border-color: rgba(60,199,180,.6) } .upill.on_scene .ust { color: var(--teal) } .upill.cleared { opacity: .6 }
+.upill.over { border-color: var(--hand); background: rgba(229,72,77,.12); animation: overp 1.4s ease-in-out infinite } .upill.over .utm { color: #ff8c8f; font-weight: 700 }
+@keyframes overp { 50% { box-shadow: 0 0 0 3px rgba(229,72,77,.25) } }
+.upill button { font-size: 11px; padding: 2px 8px; border-radius: 999px; background: #1c2838 }
+.units { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px }
