@@ -11,6 +11,7 @@ import { scheduleCallback, recordCallback, openCallbacks } from "./callbacks.js"
 import { catalog, getKit, showKitCard } from "./kits.js";
 import { scanTurn } from "./triggers.js";
 import { encodeFrame, toBase64, TARGET_CODES, ACTION_CODES, LANG_CODES } from "../device/frame.js";
+import { parseSameHeader, actionForEvent } from "./same_decoder.js";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const MIME = { ".html": "text/html; charset=utf-8", ".js": "text/javascript", ".css": "text/css", ".json": "application/json", ".csv": "text/csv", ".png": "image/png", ".svg": "image/svg+xml", ".webmanifest": "application/manifest+json" };
@@ -105,13 +106,22 @@ export function createHttpServer({ store, engine, hub }) {
       // ---- alerts (SAME path) and frames ----
       if (path === "/alerts/same" && method === "POST") {
         const body = JSON.parse((await readBody(req)).toString() || "{}");
-        const actionMap = { SPW: "shelter_in_place", EVI: "evacuate", CEM: "info_only", RWT: "info_only" };
-        const action = actionMap[body.event_code] || "info_only";
+        let event_code = body.event_code;
+        let zone = body.zone;
+        let locations = body.locations;
+        if (body.header) {
+          const parsed = parseSameHeader(body.header);
+          if (parsed.error) return json(res, 400, { error: parsed.error });
+          event_code = parsed.event;
+          zone = Number(parsed.locations[0]);
+          locations = parsed.locations;
+        }
+        const action = actionForEvent(event_code);
         const seq = (store.alerts ||= []).length + 1;
-        const frame = encodeFrame({ type: "directive", zone: Number(body.zone) || 0, target: body.target || "unknown", severity: body.event_code === "EVI" ? 5 : body.event_code === "SPW" ? 4 : 2, action, language: body.language || "en", sequence: seq }, config.frameKey);
-        const alert = { id: store.nextId("al"), ...body, action, frame_b64: toBase64(frame), created_at: new Date().toISOString() };
+        const frame = encodeFrame({ type: "directive", zone: Number(zone) || 0, target: body.target || "unknown", severity: event_code === "EVI" ? 5 : event_code === "SPW" ? 4 : 2, action, language: body.language || "en", sequence: seq }, config.frameKey);
+        const alert = { id: store.nextId("al"), ...body, event_code, zone, locations, action, frame_b64: toBase64(frame), created_at: new Date().toISOString() };
         store.alerts.push(alert);
-        store.appendEvent({ event_type: "alert_received", actor: "device", provenance: "firsthand", payload_json: { event_code: body.event_code, locations: body.locations } });
+        store.appendEvent({ event_type: "alert_received", actor: "device", provenance: "firsthand", payload_json: { event_code, locations } });
         store.appendEvent({ event_type: "alert_revoiced", actor: "device", provenance: "firsthand", payload_json: { language: body.language || "en", action } });
         return json(res, 201, alert);
       }
