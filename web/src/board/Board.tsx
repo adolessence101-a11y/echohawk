@@ -98,7 +98,7 @@ export function Board() {
       if (!dupe) { const l = feedLine(ev, incRef.current); setFeed((f) => [{ id: Math.random(), ts: ev.ts_server, where: l.where && /^Z\d\d$/.test(l.where) ? `District ${rdOf(l.where)}` : l.where, text: l.text }, ...f].slice(0, 60)); }
     }
     const i = ev.incident_id ? incRef.current[ev.incident_id] : undefined;
-    if (ev.event_type === "scan_flagged") raise("scan:" + p.zone_id, { kind: "scan", level: "ask", zones: [p.zone_id], incidentIds: Object.values(incRef.current).filter((x) => x.zone_id === p.zone_id).map((x) => x.id), scan: { n: p.n, p_tail: p.p_tail, lambda: p.lambda } });
+    if (ev.event_type === "scan_flagged" && p.zone_id && p.zone_id !== "unknown") raise("scan:" + p.zone_id, { kind: "scan", level: "ask", zones: [p.zone_id], incidentIds: Object.values(incRef.current).filter((x) => x.zone_id === p.zone_id).map((x) => x.id), scan: { n: p.n, p_tail: p.p_tail, lambda: p.lambda } });
     if (ev.event_type === "incident_spread") {
       const open = alerts.find((x) => x.kind === "spread" && x.target === p.target && (p.zones || []).some((z: string) => x.zones.includes(z)));
       raise(open ? open.key : `spread:${p.target}:${[...(p.zones || [])].sort()[0]}`, { kind: "spread", level: "hand", target: p.target, zones: p.zones, incidentIds: [ev.incident_id, p.linked_incident_id].filter(Boolean) as string[] });
@@ -180,7 +180,7 @@ export function Board() {
                   <div className="ev">{d.ev.map((e, k) => <span key={k}>{e}</span>)}</div>
                   {d.hint && <div className="hint">{d.hint}</div>}
                   <div className="acts">
-                    {d.incs.length > 0 && <DeployBar size="lg" withCallback={false} dispatched={d.incs.flatMap((i) => i.dispatched || [])} suggested={[...new Set(d.incs.flatMap((i) => suggest(undefined, i.target)))]} onSend={(u) => deploy(ids, u)} />}
+                    {d.incs.length > 0 && <DeployBar size="sm" withCallback={false} dispatched={d.incs.flatMap((i) => i.dispatched || [])} suggested={[...new Set(d.incs.flatMap((i) => suggest(undefined, i.target)))]} onSend={(u) => deploy(ids, u)} />}
                     <span className="right">
                       <button onClick={() => showOnMap(topAlert)}>Show on map</button>
                       <button onClick={() => setMinimized(true)}>Minimize</button>
@@ -191,7 +191,7 @@ export function Board() {
                 </div>
               );
             })()}
-            {restAlerts.slice(0, 3).map((a) => { const d = describe(a, byId); return (
+            {restAlerts.slice(0, 2).map((a) => { const d = describe(a, byId); return (
               <div key={a.key} className={`bar ${d.cls}`} onClick={() => setExpanded(a.key)}><span className="kind">{d.kind}</span><span className="bt">{d.title.replace(/\bZ(\d\d)\b/g, (z) => `District ${rdOf(z)}`)}</span><span className="go">open</span></div>
             ); })}
           </>

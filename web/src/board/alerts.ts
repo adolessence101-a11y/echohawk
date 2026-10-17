@@ -73,7 +73,8 @@ export function describe(a: Alert, byId: Record<string, Incident>): Described {
     if (mach) lead.push(`${mach} alarm activation${mach === 1 ? "" : "s"} (machines, not counted as callers)`);
     lead.push(`${calls} call${calls === 1 ? "" : "s"} → ${Math.max(1, incs.length)} line${incs.length > 1 ? "s" : ""}`);
   }
-  if (t0 && t1 && calls > 1) ev.push(`within ${mins(t1 - t0)}`);
+  // the scan alert is about one 15-minute window, so a long line-wide time span would contradict its headline
+  if (t0 && t1 && calls > 1 && a.kind !== "scan" && t1 - t0 <= 30 * 60000) ev.push(`within ${mins(t1 - t0)}`);
   if (a.triggers.length && a.kind !== "trigger") ev.push(`heard: ${a.triggers.map(trig).join(", ")}`);
   if (!cls && a.level !== "hand") cls = "amber";
   return { kind, title, hint, cls, ev: [...lead, ...ev], incs };

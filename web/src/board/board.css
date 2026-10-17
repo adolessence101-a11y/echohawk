@@ -38,28 +38,28 @@ svg.links line { stroke: var(--ask); stroke-width: 6; stroke-linecap: round; str
 .feed .st { margin-left: auto; font-size: 11px; color: var(--dim) } .feed .st a { color: var(--ask) }
 
 /* alert takeover */
-.alerts { position: fixed; top: 74px; left: 50%; transform: translateX(-50%); width: min(880px, 94vw); z-index: 50; display: flex; flex-direction: column; gap: 10px; pointer-events: none }
-.alert { pointer-events: auto; border-radius: 16px; padding: 16px 18px 14px; background: linear-gradient(180deg, #3a0f12, #250a0c); border: 2px solid var(--hand); box-shadow: 0 20px 60px rgba(0,0,0,.6), 0 0 0 6px rgba(255,77,79,.15); animation: drop .45s cubic-bezier(.2,1.3,.4,1) }
+.alerts { position: fixed; top: 74px; right: 22px; width: min(520px, 94vw); z-index: 5000; display: flex; flex-direction: column; gap: 6px; pointer-events: none }
+.alert { pointer-events: auto; border-radius: 12px; padding: 11px 14px 11px; background: linear-gradient(180deg, #3a0f12, #250a0c); border: 2px solid var(--hand); box-shadow: 0 20px 60px rgba(0,0,0,.6), 0 0 0 6px rgba(255,77,79,.15); animation: drop .45s cubic-bezier(.2,1.3,.4,1) }
 .alert.amber { background: linear-gradient(180deg, #3a2a08, #241a06); border-color: var(--ask); box-shadow: 0 20px 60px rgba(0,0,0,.6), 0 0 0 6px rgba(255,176,32,.15) }
 .alert.violet { background: linear-gradient(180deg, #24173f, #170f2b); border-color: var(--machine); box-shadow: 0 20px 60px rgba(0,0,0,.6), 0 0 0 6px rgba(155,123,255,.15) }
 @keyframes drop { from { transform: translateY(-30px) scale(.97); opacity: 0 } to { transform: none; opacity: 1 } }
-.alert .ah { display: flex; align-items: center; gap: 10px; font-size: 12px; font-weight: 800; letter-spacing: 1.2px }
-.alert .kind, .bar .kind { padding: 3px 10px; border-radius: 6px; background: var(--hand); color: #fff; font-size: 11px; font-weight: 800; letter-spacing: 1px }
+.alert .ah { display: flex; align-items: center; gap: 10px; font-size: 11px; font-weight: 800; letter-spacing: 1.2px }
+.alert .kind, .bar .kind { padding: 2px 8px; border-radius: 5px; background: var(--hand); color: #fff; font-size: 10px; font-weight: 800; letter-spacing: 1px }
 .alert.amber .kind, .bar.amber .kind { background: var(--ask); color: #1b1300 } .alert.violet .kind, .bar.violet .kind { background: var(--machine); color: #fff }
 .alert .ah time { margin-left: auto; color: #e5c4c5; font-weight: 500; letter-spacing: 0; font-variant-numeric: tabular-nums }
-.alert .title { font-size: 25px; font-weight: 750; margin: 8px 0 8px; line-height: 1.2 }
+.alert .title { font-size: 16.5px; font-weight: 700; margin: 6px 0 6px; line-height: 1.25 }
 .alert .ev { display: flex; gap: 8px; flex-wrap: wrap }
-.alert .ev span { font-size: 13px; padding: 3px 10px; border-radius: 999px; background: rgba(255,255,255,.08); font-variant-numeric: tabular-nums }
-.alert .hint { font-size: 13.5px; color: #f1d6d6; margin-top: 9px } .alert.amber .hint { color: #f3e2bd } .alert.violet .hint { color: #ddd2ff }
+.alert .ev span { font-size: 11.5px; padding: 2px 8px; border-radius: 999px; background: rgba(255,255,255,.08); font-variant-numeric: tabular-nums }
+.alert .hint { font-size: 12px; color: #f1d6d6; margin-top: 6px } .alert.amber .hint { color: #f3e2bd } .alert.violet .hint { color: #ddd2ff }
 .alert .acts { display: flex; align-items: flex-end; gap: 8px; flex-wrap: wrap }
 .alert .deploy button { background: rgba(255,255,255,.07); border-color: rgba(255,255,255,.18) }
 .alert .deploy button.sugg { border-color: var(--ok); color: #bff5dc; background: rgba(61,220,151,.14) }
-.alert .right { margin-left: auto; display: flex; gap: 6px; margin-top: 10px } .alert .right button { background: rgba(255,255,255,.05); border-color: rgba(255,255,255,.16); font-size: 13px }
-.bar { pointer-events: auto; display: flex; align-items: center; gap: 10px; padding: 9px 14px; border-radius: 12px; background: #2a0d10; border: 1px solid rgba(255,77,79,.7); cursor: pointer; animation: drop .4s ease-out; box-shadow: 0 10px 30px rgba(0,0,0,.5) }
+.alert .right { margin-left: auto; display: flex; gap: 4px; margin-top: 8px } .alert .right button { background: rgba(255,255,255,.05); border-color: rgba(255,255,255,.16); font-size: 11.5px; padding: 3px 8px }
+.bar { pointer-events: auto; display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-radius: 10px; background: #2a0d10; border: 1px solid rgba(255,77,79,.7); cursor: pointer; animation: drop .4s ease-out; box-shadow: 0 10px 30px rgba(0,0,0,.5) }
 .bar.amber { background: #2a1f07; border-color: rgba(255,176,32,.7) } .bar.violet { background: #1d1433; border-color: rgba(155,123,255,.7) }
-.bar .bt { font-weight: 650; font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis } .bar .go { margin-left: auto; color: var(--muted); font-size: 12px }
+.bar .bt { font-weight: 600; font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis } .bar .go { margin-left: auto; color: var(--muted); font-size: 12px }
 .more { pointer-events: auto; align-self: center; background: #1c2130; border: 1px solid var(--line); border-radius: 999px; padding: 5px 14px; font-size: 12px; color: var(--muted); cursor: pointer }
-.edge { position: fixed; inset: 0; pointer-events: none; z-index: 40 }
+.edge { position: fixed; inset: 0; pointer-events: none; z-index: 4900 }
 .edge.go { animation: edge 1.6s ease-out }
 @keyframes edge { 0% { box-shadow: inset 0 0 0 10px rgba(255,77,79,.9), inset 0 0 120px rgba(255,77,79,.5) } 100% { box-shadow: inset 0 0 0 0 rgba(255,77,79,0) } }
 
@@ -94,11 +94,11 @@ svg.links line { stroke: var(--ask); stroke-width: 6; stroke-linecap: round; str
 .drawer .dstats { display: flex; gap: 14px; flex-wrap: wrap; font-size: 13px; color: var(--muted); margin-top: 8px } .drawer .dstats b { color: var(--text) }
 .drawer .why { font-size: 13px; color: #c2cbd8; margin-top: 6px }
 .drawer .dacts { display: flex; align-items: flex-end; gap: 8px; flex-wrap: wrap } .drawer .dacts > button { margin-top: 10px }
-.mappanel { position: relative; display: flex; flex-direction: column; min-height: 520px }
+.mappanel { position: relative; display: flex; flex-direction: column; min-height: 520px; isolation: isolate; z-index: 0 }
 .maphead { position: absolute; z-index: 500; top: 12px; left: 14px; right: 14px; display: flex; align-items: center; gap: 10px; pointer-events: none }
 .maphead > * { pointer-events: auto } .maptitle { font-size: 18px; font-weight: 600; text-shadow: 0 2px 8px #000 }
 .maphead .tabs { margin-left: auto; background: rgba(18,26,38,.9) }
-.mapwrap { position: relative; flex: 1; display: flex }
+.mapwrap { position: relative; flex: 1; display: flex; isolation: isolate; z-index: 0 }
 .lamap { flex: 1; min-height: 520px }
 .maplegend { position: absolute; z-index: 500; top: 56px; right: 14px; background: rgba(11,17,26,.88); border: 1px solid var(--line2); border-radius: 8px; padding: 8px 12px; display: flex; flex-direction: column; gap: 5px; font-size: 12px; color: #dbe2ec }
 .maplegend i { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 8px; vertical-align: -1px } .maplegend i.ring { background: transparent; border: 1.5px solid #c2cbd8 }
@@ -111,3 +111,6 @@ svg.links line { stroke: var(--ask); stroke-width: 6; stroke-linecap: round; str
 .disclaim { color: var(--dim); font-size: 11.5px; white-space: nowrap }
 .lower .panel .feed { padding: 6px 18px 12px }
 @media (max-width: 1150px) { .split, .lower { grid-template-columns: 1fr } .statrow { grid-template-columns: repeat(2, 1fr) } .disclaim { display: none } }
+.alert .deploy { margin-top: 8px } .alert .deploy button { padding: 4px 9px; font-size: 12px }
+.more { align-self: flex-end }
+.alert .kind, .bar .kind { white-space: nowrap; flex: none }

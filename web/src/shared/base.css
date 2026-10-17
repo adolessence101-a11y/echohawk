@@ -50,7 +50,7 @@ h2 { margin: 0; font-size: 12px; text-transform: uppercase; letter-spacing: 1px;
 @keyframes tin { from { opacity: 0; transform: translateY(6px) } to { opacity: 1; transform: none } }
 
 /* ---------- app header (interface concept) ---------- */
-.apphead { position: sticky; top: 0; z-index: 30; height: 62px; display: flex; align-items: center; gap: 22px; padding: 0 26px; background: #0e1520; border-bottom: 1px solid var(--line) }
+.apphead { position: sticky; top: 0; z-index: 4000; height: 62px; display: flex; align-items: center; gap: 22px; padding: 0 26px; background: #0e1520; border-bottom: 1px solid var(--line) }
 .apphead .mark { display: flex; align-items: center; gap: 10px; color: var(--text); text-decoration: none; font-size: 19px; font-weight: 600; letter-spacing: .1px; margin-right: 18px }
 .tabsnav { display: flex; gap: 6px; align-self: stretch }
 .tabsnav a { display: flex; align-items: center; padding: 0 14px; color: #c2cbd8; text-decoration: none; font-size: 14.5px; border-bottom: 2px solid transparent; margin-bottom: -1px }
