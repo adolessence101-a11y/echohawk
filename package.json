@@ -10,7 +10,9 @@
     "test": "node --test server/test/*.test.js",
     "seed": "node server/seed.js",
     "provision": "node server/provision_retell.js",
-    "fake-call": "node server/fake_retell_client.js"
+    "fake-call": "node server/fake_retell_client.js",
+    "build:web": "npm --prefix web install && npm --prefix web run build",
+    "dev:web": "npm --prefix web run dev"
   },
   "engines": {
     "node": ">=20"

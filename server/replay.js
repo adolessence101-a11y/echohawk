@@ -12,7 +12,7 @@ import { loadAdjacency, loadBaselines } from "./seed.js";
 // LAPD call type text -> EchoHawk target/action/severity/source. Radio-code families (team mapping, not LAPD's).
 const RULES = [
   [/^906|RINGER|SILENT|ALARM/i, { source: "telemetry", target: "alarm", action: "dispatch_police", severity: 2 }],
-  [/FIRE|\bFD\b/i, { target: "structure_fire", action: "dispatch_fire", severity: 4 }],
+  [/\bFIRE\b|\bFD\b/i, { target: "structure_fire", action: "dispatch_fire", severity: 4 }],
   [/^90[47]|^918|^927|AMB|CPI|O\/D|SUICIDE|DEAD|D\/B/i, { target: "person", action: "dispatch_ems", severity: 4 }],
   [/T\/C|TRAFFIC|^961/i, { target: "vehicle", action: "dispatch_police", severity: 3 }],
   [/^903|HAZARD|WIRE|TREE|FLOOD/i, { target: "road", action: "dispatch_police", severity: 3 }],
@@ -65,12 +65,23 @@ export function runReplay(date, { fromHour = 0, toHour = 24 } = {}) {
       rung: inc?.rung || "watch", reason: inc?.last_reason || "", flagged: flags.length > before ? flags.at(-1) : null,
     });
   }
+  frames.forEach((f, i) => { f.n = i + 1; });  // ticket number in arrival order (1-based)
   const passthrough = frames.filter((f) => f.passthrough).length;
-  const incidents = store.incidents.map((i) => ({ id: i.id, rd: i.zone_id, target: i.target, size: i.packet_ids.length, independent: i.independent_count, machine: i.machine_count || 0, rung: i.rung, opened: i.opened_at.slice(11, 19), last: i.last_packet_at.slice(11, 19), reason: i.last_reason }));
+  const incidents = store.incidents.map((i) => ({ id: i.id, rd: i.zone_id, target: i.target, size: i.packet_ids.length, independent: i.independent_count, machine: i.machine_count || 0, rung: i.rung, opened: i.opened_at.slice(11, 19), last: i.last_packet_at.slice(11, 19), reason: i.last_reason, ...incidentTrail(frames, i.id) }));
   const multi = incidents.filter((i) => i.size > 1);
   return {
     date, fromHour, toHour, source: "LAPD Calls for Service (data.lacity.org xjgu-z4ju), officer-initiated removed",
     totals: { calls: frames.length, tickets_as_it_happened: frames.length, echohawk_lines: incidents.length + passthrough, passthrough_crime: passthrough, grouped_lines: multi.length, calls_in_groups: multi.reduce((a, i) => a + i.size, 0), machine_calls: frames.filter((f) => f.machine).length, scan_flags: flags.length },
     frames, incidents, flags: flags.map((f) => ({ ...f, time: f.window_start.slice(11, 16) })),
+  };
+}
+
+// Where an incident sits in the arrival stream: its area, which ticket numbers fed it, and when the scan flagged it.
+function incidentTrail(frames, id) {
+  const fs = frames.filter((f) => f.incident === id);
+  const fl = fs.find((f) => f.flagged);
+  return {
+    area: fs[0]?.area || "", ticket_numbers: fs.map((f) => f.n), call_types: [...new Set(fs.map((f) => f.type))],
+    flag: fl ? { t: fl.t, ticket: fl.n, nth_in_line: fs.indexOf(fl) + 1, window_n: fl.flagged.n, p_tail: fl.flagged.p_tail, lambda: fl.flagged.lambda } : null,
   };
 }

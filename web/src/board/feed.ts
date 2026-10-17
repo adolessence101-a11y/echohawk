@@ -1,0 +1,32 @@
+import type { EventRow, Incident } from "../shared/types";
+import { RUNG_LABEL, plainReason, tName, trig, unitLabel } from "../shared/labels";
+
+export const FEED_COLOR: Record<string, string> = {
+  packet_created: "var(--watch)", incident_opened: "var(--watch)", rung_changed: "var(--hand)", trigger_fired: "var(--hand)", incident_spread: "var(--ask)",
+  scan_flagged: "var(--ask)", units_dispatched: "var(--ok)", call_flagged: "var(--machine)", transfer_started: "var(--ok)", kit_shown: "var(--muted)",
+  callback_no_answer: "var(--ask)", dispatcher_joined: "var(--ok)", dispatcher_said: "var(--muted)",
+};
+export const FEED_TYPES = new Set(Object.keys(FEED_COLOR));
+
+// One human sentence per event, instead of raw JSON.
+export function feedLine(ev: EventRow, byId: Record<string, Incident>): { where: string; text: string } {
+  const p = ev.payload_json || {}, i = ev.incident_id ? byId[ev.incident_id] : undefined;
+  const where = String(p.zone_id || i?.zone_id || "");
+  const t = p.target || i?.target;
+  switch (ev.event_type) {
+    case "packet_created": return { where: where || "no zone", text: p.source === "telemetry" ? "alarm activation (machine)" : p.content_status === "none" ? "call with no usable details (counted for volume only)" : `${tName(t)} · new AI call` };
+    case "incident_opened": return { where, text: `new line: ${tName(t)}` };
+    case "rung_changed": return { where, text: `${tName(t)} moved to ${RUNG_LABEL[p.to as keyof typeof RUNG_LABEL] || p.to} (${plainReason(p.reason)})` };
+    case "trigger_fired": return { where, text: `caller said: ${(p.triggers || []).map(trig).join(", ")}` };
+    case "incident_spread": return { where: (p.zones || []).join(" and "), text: `${tName(p.target)} spreading across neighboring zones` };
+    case "scan_flagged": return { where, text: `unusual volume: ${p.n} reports in 15 min` };
+    case "units_dispatched": return { where, text: `${(p.units || []).map(unitLabel).join(", ")} sent by ${ev.actor || ""}` };
+    case "call_flagged": return { where: "", text: `AI call flagged for review: ${String(p.flag || "").replace(/_/g, " ")}` };
+    case "transfer_started": return { where: "", text: "AI call handed to a dispatcher" };
+    case "kit_shown": return { where, text: "caller sent a safety card" };
+    case "callback_no_answer": return { where, text: "callback not answered" };
+    case "dispatcher_joined": return { where: "", text: "dispatcher joined a live call" };
+    case "dispatcher_said": return { where: "", text: "dispatcher spoke on a live call" };
+    default: return { where: "", text: ev.event_type };
+  }
+}

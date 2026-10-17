@@ -163,6 +163,13 @@ export class RetellHub {
     const s = this.sessions.get(callId); if (!s) return { ok: false, status: 404 };
     s.dispatcherJoined = true; const c = this.store.calls.find((x) => x.id === callId); if (c) c.dispatcher_id = dispatcherId;
     this.store.appendEvent({ event_type: "dispatcher_joined", call_id: callId, actor: "dispatcher", provenance: "firsthand", payload_json: { dispatcher_id: dispatcherId } });
+    // catch the dispatcher up: translate everything said so far (caller and AI) into English
+    if (s.callerLang && s.callerLang !== "en") {
+      for (const row of this.store.turns.filter((t) => t.call_id === callId && (t.role === "user" || t.role === "agent") && !t.text_translated && t.translated_from !== t.text_original)) {
+        const src = row.text_original; row.translated_from = src;
+        translate(src, "en", s.callerLang).then((tr) => { row.text_translated = tr; this.store.appendEvent({ event_type: "turn_translated", call_id: callId, actor: "system", provenance: "firsthand", payload_json: { role: row.role, text: tr } }); }).catch(() => {});
+      }
+    }
     return { ok: true, caller_language: s.callerLang };
   }
   // Dispatcher takes the call from the AI: join (AI goes quiet) and tell the caller, in their language, a person is on.
