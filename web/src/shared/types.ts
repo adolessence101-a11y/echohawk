@@ -4,7 +4,10 @@ export type Unit = "ems" | "fire" | "police" | "utility" | "callback";
 
 export interface Dispatched { unit: Unit; at: string; by: string; note?: string; status?: UnitStatus; status_at?: string }
 export type UnitStatus = "assigned" | "en_route" | "on_scene" | "cleared" | "cancelled";
-export interface UnitRow { incident_id: string; zone_id: string; target: string; rung: Rung; n: number; unit: Unit; status: UnitStatus; status_at: string; seconds: number; limit_s: number | null; overdue: boolean; next: UnitStatus[] }
+export interface UnitRow { incident_id: string; zone_id: string; target: string; rung: Rung; n: number; unit: Unit; status: UnitStatus; status_at: string; seconds: number; limit_s: number | null; overdue: boolean; next: UnitStatus[]; shared_from?: { incident_id: string; n: number } | null; stops?: { incident_id: string; n: number }[]; nearby?: NearbyStop[] }
+export interface NearbyStop { incident_id: string; zone_id: string; target: string; rung: Rung; independent_count: number; where: string }
+export interface ApproxArea { lat: number; lon: number; radius_m: number; nodes: number; simulated: boolean }
+export interface HistoryFile { source: string; days: number; from: string; to: string; excluded: string; categories: string[]; rd: Record<string, Record<string, number>> }
 
 export interface Incident {
   id: string;
@@ -23,6 +26,10 @@ export interface Incident {
   spread_linked_incident_id?: string | null;
   packet_ids: string[];
   dispatched?: Dispatched[];
+  heard_by?: string[];
+  approx_area?: ApproxArea | null;
+  self_reported_held?: number;
+  triage_note?: string | null;
 }
 
 export interface Packet {

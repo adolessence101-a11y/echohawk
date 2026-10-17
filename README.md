@@ -17,14 +17,14 @@ Spec: `docs/BUILD_SPEC.md`. Build plan, acceptance tests and lanes: `docs/IMPLEM
 ```bash
 npm install            # server dependency (ws); retell-sdk is optional and only needed for provisioning
 cp .env.example .env   # RETELL_API_KEY for provisioning, ANTHROPIC_API_KEY for Claude; the demo runs with no keys
-npm test               # 86 tests, about two seconds
+npm test               # 96 tests, about two seconds
 npm start              # http://localhost:8787
 npm run build:web      # only after changing web/src: rebuilds the React screens into web/dist (a built copy is committed)
 ```
 
 | URL | Who | What |
 |---|---|---|
-| `/board?token=dev-supervisor` | supervisor | counts, ranked incidents with inline details and send buttons, LA district map or zone grid, pop-up alerts for bigger issues, live calls (listen, interpret, take over), units in the field with watchdog timers, close with a disposition, public alert button |
+| `/board?token=dev-supervisor` | supervisor | counts, ranked incidents with inline details and send buttons, LA district map or zone grid, pop-up alerts for bigger issues, live calls (listen, interpret, take over), units in the field with watchdog timers and nearby stops, close with a disposition, history layer on the map, chirp relay demo, public alert button |
 | `/console?token=dev-dispatcher` | dispatcher | live calls first, transcript with translation, Interpreter Mode, takeover, send EMS/Fire/Police/Utility/Callback, unit status, Flag AI, Action Kits |
 | `/alerts` | alerting agency | sign in (agency, name, passcode `dev-agency`), draft evacuation order or warning, shelter in place, advisory, all clear; a second person approves before anything goes out; active alerts with resident replies and translation status |
 | `/app/` | resident | installable PWA: alerts for your zone in your language with "I'm safe / I've left / I need help", updates on your own reports, call the support line, check in (queued offline), Action Kits offline, listen for a chirp, beacon |
@@ -41,13 +41,14 @@ The React screens live in `web/` (Vite + React + TypeScript). The previous singl
 2. Board or console: **Simulate a live call**. A Spanish caller ("no tenemos agua") stays on for three minutes. Open it:
    listen, **Join interpreter**, type in English and the caller hears Spanish, then **Take over**.
 3. Board: expand a row, **Send Utility**, move the unit En route then On scene in "Units in the field". Leave one in Assigned
-   for two minutes and it flags as overdue. Close it **as Unable to locate** and a callback lands in the silence panel.
+   for two minutes and it flags as overdue. Under the unit, "Also nearby" offers calls the same crew can clear; tap one to add the stop. Close it **as Unable to locate** and a callback lands in the silence panel.
 4. Phone (`/app/`, zone 0812): check in about the water. When the unit goes En route the phone shows "A unit is on the way."
 5. Board: **Public alert**, send an advisory ("we know, crews are on it, no need to call"). It appears on the phone in the
    phone's language and is read aloud. Ask for an evacuation warning: it lands in `/alerts` as a request.
 6. `/alerts`: sign in as one person, draft it; sign in as a second person, **Approve and send**. The phone shows it with
    "I need help", which puts that resident on the board as "needs a person".
-7. `/replay`: chapter 2, RD 0802 rang 8 times in 30 seconds on January 7, 2025, flagged at the third ring.
+7. Board: **Chirp relay**. One SOS chirp reaches three pole nodes; the row says "heard by 3 nodes, counted once" and the map draws the area.
+8. `/replay`: chapter 2, RD 0802 rang 8 times in 30 seconds on January 7, 2025, flagged at the third ring.
 
 Terminal alternatives: `npm run seed` (the 20-call script), `npm run fake-call -- ws://localhost:8787 spanish_water --hold 180`.
 Fake callers: `water | bleeding | breathing | spanish | spanish_water | hangup`.
@@ -72,6 +73,14 @@ Action Kits stay in reviewed English and Spanish only.
 The agent uses a custom LLM over websocket (`wss://.../retell/llm/{call_id}`), so our server owns every turn, the kit cards,
 the triggers and the transfer decision. With `ANTHROPIC_API_KEY` set, Claude does extraction, replies and translation; without
 a key the rule-based fallback runs the demo in English and Spanish.
+
+## Mentor feedback built in (Oct 17)
+
+- One crew, several stops: `GET /units` lists nearby calls each unit can also clear (same or neighboring district, a type it covers, never a call that needs a person); `POST /incidents/:id/units/:n/stop`.
+- The app cannot set its own priority: app and eHawk reports marked above 3 are held at 3 unless danger words back them up (fire, gas, downed lines and floods keep what was reported). `server/triage.js`.
+- Node relays: the same chirp heard by several nodes counts once; the board shows which nodes heard it and the area they cover. Nodes are simulated (`server/relay.js`).
+- History layer: districts shaded by past dispatched LAPD calls of one type, 55 days, labeled as calls, not confirmed crimes (`data/history_by_rd.json`, built by `scripts/history_by_rd.py`).
+- Research export: `GET /research/export.csv` (dispatcher or supervisor token), one row per incident, no identifiers.
 
 ## Who may send which alert
 
@@ -112,4 +121,4 @@ data/     LAPD baselines and replay days
 `npm test` runs the engine, protocol (over a real websocket), Claude provider, security, HTTP, callbacks, SAME decoder, zone,
 language detection (one sentence in each of the 15 languages), public alert rules (two-person approval, supervisor limits,
 all clear, signed frames, "I need help" escalation) and post-dispatch tests (unit status order, watchdog, unable to locate
-schedules a callback, reporter sees "a unit is on the way").
+schedules a callback, reporter sees "a unit is on the way") and the mentor tests (nearby stops, self-report triage, node relays, research export without identifiers).

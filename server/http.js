@@ -15,7 +15,10 @@ import { parseSameHeader, actionForEvent } from "./same_decoder.js";
 import { runReplay, availableDays } from "./replay.js";
 import { Broadcasts, AGENCIES, KINDS } from "./broadcasts.js";
 import { LANGUAGES } from "./languages.js";
-import { initUnit, setUnitStatus, unitBoard, closeWithDisposition, updatesForDevice, DISPOSITIONS, WATCHDOG_S } from "./units.js";
+import { initUnit, setUnitStatus, unitBoard, closeWithDisposition, updatesForDevice, addStop, DISPOSITIONS, WATCHDOG_S } from "./units.js";
+import { triageSelfReport } from "./triage.js";
+import { recordHearing, rememberFirst, zoneOfNode, DEMO_NODES } from "./relay.js";
+import { researchRows, toCsv } from "./research.js";
 import { translate } from "./llm.js";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -71,21 +74,41 @@ export function createHttpServer({ store, engine, hub }) {
         return json(res, 200, { ok: true });
       }
 
+      // one chirp heard by several nodes counts once; which nodes heard it narrows where it came from (relay.js)
+      const devicePacket = (body) => {
+        const hearing = recordHearing(store, body);
+        if (hearing.duplicate) return { status: 200, body: { duplicate: true, packet_id: hearing.packet?.packet_id || null, incident_id: hearing.packet?.incident_id || null, heard_by: hearing.heard_by, approx_area: hearing.packet?.approx_area || null } };
+        const zone = body.zone_id || zoneOfNode(hearing.node) || undefined;
+        const { packet, errors } = makePacket({ ...body, zone_id: zone, source: body.source || "ehawk", provenance: body.provenance || "forwarded" });
+        if (errors.length) return { status: 400, body: { errors } };
+        const triggers = body.text ? scanTurn(body.text) : { hard: [], soft: [] };
+        triageSelfReport(packet, triggers);
+        packet.packet_id ||= store.nextId("pk");
+        rememberFirst(store, hearing.key, hearing.node, packet);
+        const out = engine.ingest(packet, { triggers });
+        return { status: 201, body: { packet_id: packet.packet_id, incident_id: out.incident?.id || null, rung: out.rung, severity: packet.severity, triage_note: packet.triage_note || null, heard_by: packet.heard_by || [], approx_area: packet.approx_area || null } };
+      };
+      if (path === "/nodes" && method === "GET") return json(res, 200, { simulated: true, nodes: DEMO_NODES });
+      // demo: one SOS chirp from a phone near three pole nodes; all three relay it, the board shows one report heard by three
+      if (path === "/demo/relay" && method === "POST") {
+        const frame_id = `demo-${Date.now()}`, results = [];
+        for (const node_id of ["N-0812-A", "N-0812-B", "N-0812-C"]) results.push(devicePacket({ frame_id, node_id, identifier: "demo-phone-relay", target: "person", severity: 5, action: "welfare_check", text: "trapped, can't get out", content_status: "extracted" }).body);
+        return json(res, 201, { ok: true, results });
+      }
       // ---- packets and incidents ----
       if (path === "/packets" && method === "POST") {
         const body = JSON.parse((await readBody(req)).toString() || "{}");
         const { packet, errors } = makePacket(body);
         if (errors.length) return json(res, 400, { errors });
         const triggers = body.text ? scanTurn(body.text) : { hard: [], soft: [] };
+        triageSelfReport(packet, triggers);
         const out = engine.ingest(packet, { triggers });
-        return json(res, 201, { packet_id: packet.packet_id, incident_id: out.incident?.id || null, rung: out.rung, reason: out.reason });
+        return json(res, 201, { packet_id: packet.packet_id, incident_id: out.incident?.id || null, rung: out.rung, reason: out.reason, severity: packet.severity, triage_note: packet.triage_note || null });
       }
       if (path === "/device/packets" && method === "POST") {
         const body = JSON.parse((await readBody(req)).toString() || "{}");
-        const { packet, errors } = makePacket({ ...body, source: body.source || "ehawk", provenance: body.provenance || "forwarded" });
-        if (errors.length) return json(res, 400, { errors });
-        const out = engine.ingest(packet, {});
-        return json(res, 201, { packet_id: packet.packet_id, incident_id: out.incident?.id || null, rung: out.rung });
+        const out = devicePacket(body);
+        return json(res, out.status, out.body);
       }
       if (path === "/incidents" && method === "GET") { const rung = url.searchParams.get("rung"); let list = engine.ranked(); if (rung) list = list.filter((i) => i.rung === rung); return json(res, 200, list); }
       if (path.startsWith("/incidents/") && method === "GET") { const id = path.split("/")[2]; const inc = store.incidents.find((i) => i.id === id); if (!inc) return json(res, 404, { error: "not found" }); return json(res, 200, { ...inc, keys: undefined, packets: store.packets.filter((p) => p.incident_id === id), events: store.events.filter((e) => e.incident_id === id) }); }
@@ -114,8 +137,13 @@ export function createHttpServer({ store, engine, hub }) {
       if (path === "/broadcasts/active" && method === "GET") return json(res, 200, broadcasts.activeFor(url.searchParams.get("zone") || "", url.searchParams.get("lang") || "en"));
       if (path.match(/^\/broadcasts\/[^/]+\/ack$/) && method === "POST") { const body = JSON.parse((await readBody(req)).toString() || "{}"); const out = broadcasts.ack(path.split("/")[2], body.status); if (out.ok && body.status === "need_help" && body.zone) { const { packet, errors } = makePacket({ source: "app", identifier: String(body.device || "app-anon").slice(0, 60), zone_id: String(body.zone), target: "person", severity: 4, action: "welfare_check", content_status: "extracted", provenance: "firsthand", language: String(body.lang || "en") }); if (!errors.length) out.incident_id = engine.ingest(packet, { triggers: { hard: ["asks_for_human"], soft: [] } }).incident?.id || null; } return json(res, out.ok ? 200 : out.status, out); }
       // ---- after dispatch: unit status with watchdog timers, dispositions, updates back to app reporters ----
-      if (path === "/units" && method === "GET") return json(res, 200, { units: unitBoard(store), watchdog_s: WATCHDOG_S, dispositions: DISPOSITIONS });
+      if (path === "/units" && method === "GET") return json(res, 200, { units: unitBoard(store, Date.now(), engine.adjacency), watchdog_s: WATCHDOG_S, dispositions: DISPOSITIONS });
       if (path.match(/^\/incidents\/[^/]+\/units\/\d+\/status$/) && method === "POST") { const r = role(req); if (r === "anon") return json(res, 401, { error: "token" }); const [, , id, , n] = path.split("/"); const inc = store.incidents.find((i) => i.id === id); if (!inc) return json(res, 404, { error: "not found" }); const body = JSON.parse((await readBody(req)).toString() || "{}"); const out = setUnitStatus(store, inc, Number(n), body.status, r); return json(res, out.ok ? 200 : out.status, out); }
+      if (path.match(/^\/incidents\/[^/]+\/units\/\d+\/stop$/) && method === "POST") { const r = role(req); if (r === "anon") return json(res, 401, { error: "token" }); const [, , id, , n] = path.split("/"); const inc = store.incidents.find((i) => i.id === id); if (!inc) return json(res, 404, { error: "not found" }); const body = JSON.parse((await readBody(req)).toString() || "{}"); const target = store.incidents.find((i) => i.id === body.incident_id); const out = addStop(store, inc, Number(n), target, r); return json(res, out.ok ? 200 : out.status, out); }
+      // historical layer: dispatched LAPD calls by type per reporting district (calls, not confirmed crimes)
+      if (path === "/history/rd" && method === "GET") { const f = join(root, "data/history_by_rd.json"); if (!existsSync(f)) return json(res, 404, { error: "no history file" }); res.writeHead(200, { "content-type": "application/json" }); return res.end(await readFile(f)); }
+      // research export: one row per incident, no phone or device ids, no transcripts, no names
+      if (path === "/research/export.csv" && method === "GET") { if (role(req) === "anon") return json(res, 401, { error: "token" }); res.writeHead(200, { "content-type": "text/csv", "content-disposition": "attachment; filename=echohawk_research_export.csv" }); return res.end(toCsv(researchRows(store))); }
       if (path.match(/^\/incidents\/[^/]+\/disposition$/) && method === "POST") { const r = role(req); if (r === "anon") return json(res, 401, { error: "token" }); const inc = store.incidents.find((i) => i.id === path.split("/")[2]); if (!inc) return json(res, 404, { error: "not found" }); const body = JSON.parse((await readBody(req)).toString() || "{}"); const out = closeWithDisposition(store, engine, inc, body.disposition, r, body.note || ""); return json(res, out.ok ? 200 : out.status, out); }
       if (path === "/my/updates" && method === "GET") return json(res, 200, updatesForDevice(store, url.searchParams.get("device") || "", url.searchParams.get("zone") || ""));
       if (path === "/zones/windows" && method === "GET") return json(res, 200, store.zoneWindows.slice(-2000));

@@ -113,7 +113,14 @@ export class Engine {
   ranked() {
     const order = { hand: 0, ask: 1, watch: 2 };
     return this.store.incidents.filter((i) => !i.closed_at).sort((a, b) => order[a.rung] - order[b.rung] || b.score - a.score || new Date(b.last_packet_at) - new Date(a.last_packet_at))
-      .map((i) => ({ ...i, keys: undefined, trend: this._trend(i), first_report_at: i.opened_at, score_label: "confidence score (heuristic)" }));
+      .map((i) => ({ ...i, keys: undefined, trend: this._trend(i), first_report_at: i.opened_at, score_label: "confidence score (heuristic)", ...this._relay(i) }));
+  }
+  // node relays and self-report triage, summarized for the board
+  _relay(inc) {
+    const ps = this.store.packets.filter((p) => p.incident_id === inc.id);
+    const withNodes = ps.filter((p) => (p.heard_by || []).length).sort((a, b) => b.heard_by.length - a.heard_by.length)[0];
+    const held = ps.filter((p) => p.reported_severity);
+    return { heard_by: withNodes?.heard_by || [], approx_area: withNodes?.approx_area || null, self_reported_held: held.length, triage_note: held[0]?.triage_note || null };
   }
   _trend(inc) {
     const ps = this.store.packets.filter((p) => p.incident_id === inc.id).map((p) => new Date(p.received_at).getTime()).sort();

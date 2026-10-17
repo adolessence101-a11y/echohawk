@@ -1,4 +1,4 @@
-import { Fragment, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { api, token } from "../shared/api";
 import type { Call, EventRow, Health, Incident, OpenCallback, Unit, ZoneWindow } from "../shared/types";
 import { useEvents, useRefresher } from "../shared/sse";
@@ -10,9 +10,9 @@ import { rdOf } from "../shared/laMap";
 import { isMachineOnly, plainReason, suggest, tName, trig } from "../shared/labels";
 import { ZoneGrid } from "./ZoneGrid";
 import { UnitPill, STATUS_LABEL, mmss } from "../shared/Units";
-import type { UnitRow, UnitStatus } from "../shared/types";
+import type { HistoryFile, UnitRow, UnitStatus } from "../shared/types";
 import { AlertComposer } from "./AlertComposer";
-import { MapView } from "./MapView";
+import { MapView, HIST_LABEL } from "./MapView";
 import { describe, mergeAlert, PRIO, type Alert, type HistEntry } from "./alerts";
 import { FEED_TYPES, feedLine } from "./feed";
 
@@ -66,6 +66,9 @@ export function Board() {
   const [minimized, setMinimized] = useState(false);
   const [feed, setFeed] = useState<{ id: number; ts: string; where: string; text: string }[]>([]);
   const [view, setView] = useState<"map" | "zones">("map");
+  const [histCat, setHistCat] = useState<string>("");
+  const [history, setHistory] = useState<HistoryFile | null>(null);
+  useEffect(() => { if (histCat && !history) api.history().then(setHistory).catch(() => setMapNote("History file not found on the server.")); }, [histCat, history]);
   const [mapNote, setMapNote] = useState("");
   const [pings, setPings] = useState<Record<string, number>>({});
   const [zoneSel, setZoneSel] = useState<Set<string>>(new Set());
@@ -163,6 +166,8 @@ export function Board() {
   };
   const ack = async (id: string) => { await api.ack(TOK, id); setAcked((s) => new Set(s).add(id)); };
   const closeAs = async (id: string, code: string) => { if (!code) return; const r = await api.disposition(TOK, id, code); if (!r.ok) setCloseErr((e) => ({ ...e, [id]: r.data.error || "Could not close" })); else { setSel(null); toasts.push(code === "unable_to_locate" ? "Closed. A callback to the caller is scheduled (silence panel)." : `Closed: ${dispositions[code]}`); } refresh(); };
+  const addStop = async (incId: string, n: number, targetId: string) => { const r = await api.addStop(TOK, incId, n, targetId); if (!r.ok) toasts.push(r.data.error || "Could not add the stop", true); else toasts.push("Stop added. The same crew covers both."); refresh(); };
+  const relayDemo = async () => { await api.relayDemo(); toasts.push("A phone chirped an SOS. Three pole nodes heard it; it counts once."); refresh(); };
   const setUnit = async (incId: string, n: number, status: UnitStatus) => { const r = await api.unitStatus(TOK, incId, n, status); if (!r.ok) toasts.push(r.data.error || "Could not update", true); refresh(); };
   const closeAlert = (key: string, how: "dismissed" | "acknowledged") => {
     const a = alerts.find((x) => x.key === key);
@@ -260,6 +265,8 @@ export function Board() {
                   <div className="dtop"><span className="muted small">First report {ago(selInc.first_report_at)} ago{selInc.zone_id !== rdOf(selInc.zone_id) ? ` · demo zone ${selInc.zone_id}` : ""}</span></div>
                   <div className="dstats"><span><b>{selInc.packet_ids.length}</b> calls → <b>1</b> line</span><span><b>{selInc.independent_count}</b> independent</span>{!!selInc.machine_count && <span><b>{selInc.machine_count}</b> machine</span>}<span>confidence* <b>{Number(selInc.score).toFixed(2)}</b>{selInc.trend === "rising" ? " ↑" : ""}</span></div>
                   <div className="why">{closeErr[selInc.id] || (isMachineOnly(selInc) ? "Only alarm activations so far. Likely one cause (power or wind), not separate emergencies. Confirm one address first." : plainReason(selInc.last_reason))}</div>
+                  {!!selInc.heard_by?.length && <div className="relayline">📡 One chirp, heard by {selInc.heard_by.length} node{selInc.heard_by.length > 1 ? "s" : ""} ({selInc.heard_by.join(", ")}), counted once.{selInc.approx_area ? ` Came from within about ${selInc.approx_area.radius_m} m of those poles (circle on the map). Simulated nodes.` : ""}</div>}
+                  {!!selInc.self_reported_held && <div className="relayline held">⚖ {selInc.triage_note}. The app cannot set its own priority.</div>}
                   <div className="chips">{(selInc.triggers || []).map((t) => <span key={t} className="chip trig">heard: {trig(t)}</span>)}{acked.has(selInc.id) && <span className="chip">seen by supervisor</span>}</div>
                   {(selInc.dispatched || []).length > 0 && <div className="units">{(selInc.dispatched || []).map((d, n) => <UnitPill key={n} d={d} n={n} limit={watchdog[d.status || "assigned"]} onSet={(k, st) => setUnit(selInc.id, k, st)} />)}</div>}
                   <div className="dacts">
@@ -285,16 +292,20 @@ export function Board() {
           <div className="maphead">
             <span className="maptitle">Los Angeles</span>
             <div className="tabs"><button className={view === "map" ? "on" : ""} onClick={() => setView("map")}>Map</button><button className={view === "zones" ? "on" : ""} onClick={() => setView("zones")}>Zones</button></div>
+            {view === "map" && <select className="histsel" value={histCat} onChange={(e) => setHistCat(e.target.value)} title="Shade districts by past calls of one type">
+              <option value="">History: off</option>
+              {Object.entries(HIST_LABEL).map(([k, v]) => <option key={k} value={k}>History: {v}</option>)}
+            </select>}
           </div>
           {view === "map" ? (
             <div className="mapwrap">
-              <MapView incidents={inc} flagged={flagged} counts={counts} selected={selInc} onStatus={setMapNote} />
-              <div className="maplegend"><span><i style={{ background: "var(--hand)" }} />Needs a person</span><span><i style={{ background: "var(--ask)" }} />Verify</span><span><i style={{ background: "var(--watch)" }} />Watching</span><span><i style={{ background: "var(--machine)" }} />Alarms only</span><span><i className="ring" />District boundary</span></div>
+              <MapView incidents={inc} flagged={flagged} counts={counts} selected={selInc} onStatus={setMapNote} history={history} histCat={histCat || null} />
+              <div className="maplegend"><span><i style={{ background: "var(--hand)" }} />Needs a person</span><span><i style={{ background: "var(--ask)" }} />Verify</span><span><i style={{ background: "var(--watch)" }} />Watching</span><span><i style={{ background: "var(--machine)" }} />Alarms only</span><span><i className="ring" />District boundary</span>{histCat && <span><i style={{ background: "#ff8a3d" }} />Past {HIST_LABEL[histCat]} calls</span>}</div>
             </div>
           ) : (
             <div className="zonewrap"><ZoneGrid incidents={inc} byId={byId} flagged={flagged} counts={counts} pings={pings} alerted={alertedZones} selected={zoneSel} /></div>
           )}
-          <div className="mapnote">{view === "map" ? `LAPD reporting districts, City of LA GIS. ${mapNote}` : "Demo zones Z01 to Z16 for the stage. They sit on West LA districts 0801 to 0834 on the map."}</div>
+          <div className="mapnote">{view === "map" ? (histCat && history ? `History: dispatched LAPD calls coded as ${HIST_LABEL[histCat]}, ${history.days} days ${history.from} to ${history.to} (fire week excluded). Calls, not confirmed crimes. ` : "") + `LAPD reporting districts, City of LA GIS. ${mapNote}` : "Demo zones Z01 to Z16 for the stage. They sit on West LA districts 0801 to 0834 on the map."}</div>
         </section>
       </div>
 
@@ -309,7 +320,7 @@ export function Board() {
       </div>
 
       <div className="lower three">
-        <section className="panel" id="livecalls"><div className="ptitle">Live calls<span className="livecount">{liveCalls.length}</span><span className="spacer" /><button className="btn-ghost demo-call" disabled={demoCall} onClick={simulateCall}>{demoCall ? "Connecting…" : "▶ Simulate a live call"}</button></div>
+        <section className="panel" id="livecalls"><div className="ptitle">Live calls<span className="livecount">{liveCalls.length}</span><span className="spacer" /><button className="btn-ghost demo-call" onClick={relayDemo} title="A phone in airplane mode chirps an SOS near three pole nodes">📡 Chirp relay</button><button className="btn-ghost demo-call" disabled={demoCall} onClick={simulateCall}>{demoCall ? "Connecting…" : "▶ Simulate a live call"}</button></div>
           <div className="lcl">
             {!liveCalls.length && <div className="muted lcempty">No one on the line right now. Calls appear here the moment Retell connects them.</div>}
             {liveCalls.map((c) => (
@@ -332,11 +343,12 @@ export function Board() {
         </section>
         <section className="panel" id="units"><div className="ptitle">Units in the field<span className="livecount">{units.length}</span>{units.some((u) => u.overdue) && <span className="overcount">{units.filter((u) => u.overdue).length} overdue</span>}</div>
           <div className="lcl">
-            {!units.length && <div className="muted lcempty">No units out. Units appear here when someone taps Send.</div>}
+            {!units.length && <div className="muted lcempty">No units out. Units appear here when someone taps Send. A unit already out is offered nearby calls it can also cover.</div>}
             {units.map((u) => (
               <div key={u.incident_id + u.n} className={`urow ${u.overdue ? "over" : ""}`} onClick={() => setSel(u.incident_id)}>
                 <b>{u.unit.toUpperCase()}</b>
-                <div className="lcm"><b>District {rdOf(u.zone_id)} · {tName(u.target)}</b><span>{STATUS_LABEL[u.status]} for {mmss(u.seconds)}{u.limit_s ? ` · check at ${mmss(u.limit_s)}` : ""}{u.overdue ? " · OVERDUE, check on this unit" : ""}</span></div>
+                <div className="lcm"><b>District {rdOf(u.zone_id)} · {tName(u.target)}{u.shared_from ? " · added stop" : ""}</b><span>{STATUS_LABEL[u.status]} for {mmss(u.seconds)}{u.limit_s ? ` · check at ${mmss(u.limit_s)}` : ""}{u.overdue ? " · OVERDUE, check on this unit" : ""}</span>
+                  {!!u.nearby?.length && <span className="nearby" onClick={(e) => e.stopPropagation()}>Also nearby: {u.nearby.map((x) => <button key={x.incident_id} title={`${x.independent_count} source(s), ${x.where}`} onClick={() => addStop(u.incident_id, u.n, x.incident_id)}>+ {tName(x.target)}, District {rdOf(x.zone_id)}</button>)}</span>}</div>
                 <span className="unext" onClick={(e) => e.stopPropagation()}>{u.next.filter((x) => x !== "cancelled").map((x) => <button key={x} onClick={() => setUnit(u.incident_id, u.n, x)}>{STATUS_LABEL[x]}</button>)}</span>
               </div>
             ))}

@@ -12,7 +12,7 @@ Agency and supervisor requests may add `x-agency: <agency id>` and `x-operator: 
 | GET | `/health` | anon | — | `{ ok, calls_active, paid_concurrency, mode }` | — |
 | POST | `/webhooks/retell` | — (HMAC sig) | Retell webhook body | `{ ok }` | `retell_<ev>`, `packet_reconciled` |
 | POST | `/packets` | anon | `{ zone_id, target, severity, action, text?, … }` | `{ packet_id, incident_id, rung, reason }` | `packet_ingested`, `incident_opened/updated` |
-| POST | `/device/packets` | anon | same as `/packets`; `source` defaults to `"ehawk"`, `provenance` to `"forwarded"` | `{ packet_id, incident_id, rung }` | same as above |
+| POST | `/device/packets` | anon | same as `/packets`; `source` defaults to `"ehawk"`, `provenance` to `"forwarded"`; optional `node_id` + `frame_id` or `frame_b64` | `{ packet_id, incident_id, rung, heard_by, approx_area }`, or `{ duplicate: true, heard_by }` when another node already relayed the same frame | same as above, `relay_heard` |
 | GET | `/incidents` | anon | `?rung=<rung>` (optional filter) | array of incident objects | — |
 | GET | `/incidents/:id` | anon | — | incident + `packets[]` + `events[]` | — |
 | POST | `/incidents/:id/ack` | dispatcher | — | `{ ok }` | `acknowledged_by_human` |
@@ -21,6 +21,11 @@ Agency and supervisor requests may add `x-agency: <agency id>` and `x-operator: 
 | POST | `/incidents/:id/units/:n/status` | dispatcher | `{ status }`: assigned → en_route → on_scene → cleared, or cancelled from assigned/en_route; a skip returns 409 | `{ ok, unit }` | `unit_status` |
 | POST | `/incidents/:id/disposition` | dispatcher | `{ disposition, note? }`: resolved, report_taken, referred, unfounded, duplicate, unable_to_locate | `{ ok, disposition, callback_id }`; closes the incident, clears units, `unable_to_locate` schedules a callback | `incident_closed`, `incident_disposition` |
 | GET | `/units` | anon | — | `{ units[]: { incident_id, zone_id, target, n, unit, status, seconds, limit_s, overdue, next[] }, watchdog_s, dispositions }`, overdue first | — |
+| POST | `/incidents/:id/units/:n/stop` | dispatcher | `{ incident_id }` | `{ ok, unit }`; 409 if the call needs a person or the unit does not cover that type | `unit_stop_added` |
+| GET | `/nodes` | anon | — | `{ simulated: true, nodes }` pole node positions | — |
+| POST | `/demo/relay` | anon | — | `{ ok, results[] }`; one SOS chirp relayed by three nodes | `packet_created`, `relay_heard` |
+| GET | `/history/rd` | anon | — | past dispatched LAPD calls per district by type | — |
+| GET | `/research/export.csv` | dispatcher | — | CSV, one row per incident, no identifiers | — |
 | GET | `/my/updates` | anon | `?device&zone` | updates on that device's own reports: `[{ incident_id, units[], disposition, message, updated_at }]` | — |
 | POST | `/incidents/:id/callback` | anon | `{ attempt_no? }` | callback row `{ id, incident_id, attempt_no, result, … }` | `callback_scheduled` |
 | GET | `/zones/windows` | anon | — | last 2 000 zone-window records | — |
@@ -91,6 +96,8 @@ Connect with `Accept: text/event-stream`. One `event: hello` frame is sent immed
 | `units_dispatched` | Units sent to an incident |
 | `unit_status` | A unit moved to en route, on scene, cleared or cancelled |
 | `incident_disposition` | Incident closed with a disposition code |
+| `unit_stop_added` | A unit already out took a nearby call as a stop |
+| `relay_heard` | Another node heard a chirp that was already reported |
 | `alert_drafted` / `alert_requested` | Public alert saved by an agency, or requested by the supervisor |
 | `alert_sent` | Public alert approved and sent |
 | `alert_translated` | Machine translations of a sent alert are ready |

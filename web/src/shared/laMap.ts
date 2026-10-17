@@ -10,7 +10,7 @@ const ARCGIS = "https://maps.lacity.org/lahub/rest/services/LAPD/MapServer/4/que
 // Live-demo zones ("zone six") sit on 16 real West LA reporting districts so they land on the map.
 export const DEMO_ZONES: Record<string, string> = { Z01: "0801", Z02: "0802", Z03: "0803", Z04: "0804", Z05: "0811", Z06: "0812", Z07: "0813", Z08: "0814", Z09: "0821", Z10: "0822", Z11: "0823", Z12: "0824", Z13: "0831", Z14: "0832", Z15: "0833", Z16: "0834" };
 export const rdOf = (zone: string) => DEMO_ZONES[zone] || String(zone || "").padStart(4, "0");
-export const RUNG_COLOR: Record<string, string> = { hand: "#e5484d", ask: "#f2b43c", watch: "#4c9cf0", machine: "#9b7bff" };
+export const RUNG_COLOR: Record<string, string> = { hand: "#e5484d", ask: "#f2b43c", watch: "#4c9cf0", machine: "#9b7bff", history: "#ff8a3d" };
 
 type FC = { type: "FeatureCollection"; features: any[]; exceededTransferLimit?: boolean };
 
@@ -35,6 +35,7 @@ export interface LAMap {
   paint(rd: string, o: { rung?: string; intensity?: number; flagged?: boolean; label?: string }): boolean;
   focus(rds: string[]): void;
   dots(list: { rd: string; color: string; label?: string; size?: number; tag?: string }[]): void;
+  areas(list: { lat: number; lon: number; radius_m: number; label: string }[]): void;
   destroy(): void;
 }
 
@@ -49,6 +50,7 @@ export async function createLAMap(el: HTMLElement, say: (t: string) => void, cen
   L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Reference/MapServer/tile/{z}/{y}/{x}", { maxZoom: 16, pane: "labels" }).addTo(map);
   L.control.scale({ imperial: true, metric: false, position: "bottomleft" }).addTo(map);
   const dotLayer = L.layerGroup().addTo(map);
+  const areaLayer = L.layerGroup().addTo(map);
   const byRD: Record<string, Leaflet.Path[]> = {};
   try {
     const gj = await loadRD(say);
@@ -78,6 +80,10 @@ export async function createLAMap(el: HTMLElement, say: (t: string) => void, cen
         else if (d.label) m.bindTooltip(d.label);
         m.addTo(dotLayer);
       }
+    },
+    areas(list) {
+      areaLayer.clearLayers();
+      for (const a of list) L.circle([a.lat, a.lon], { radius: a.radius_m, color: "#e5484d", weight: 2, dashArray: "6 4", fillColor: "#e5484d", fillOpacity: 0.12 }).bindTooltip(a.label, { sticky: true }).addTo(areaLayer);
     },
     destroy() { map.remove(); },
   };

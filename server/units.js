@@ -35,8 +35,46 @@ export function setUnitStatus(store, inc, n, status, by) {
   return { ok: true, unit: u };
 }
 
+// Which calls a unit type can also take on the way (mentor feedback, Oct 17: one unit can clear several nearby problems).
+// Team judgment; agencies set their own. A "needs a person" (hand) incident always gets its own unit, never a shared stop.
+export const CAN_COVER = {
+  utility: ["water", "power", "gas", "power_line"],
+  police: ["crime", "road", "vehicle", "person", "alarm"],
+  fire: ["structure_fire", "wildfire", "gas", "power_line", "alarm", "flood"],
+  ems: ["person"],
+  callback: [],
+};
+
+// open incidents in the same or a neighboring district that this unit could also clear, closest first
+export function nearbyFor(store, adjacency, inc, unit) {
+  const types = CAN_COVER[unit] || [];
+  const near = new Set(adjacency[inc.zone_id] || []);
+  return store.incidents
+    .filter((o) => o.id !== inc.id && !o.closed_at && o.rung !== "hand" && types.includes(o.target) && (o.zone_id === inc.zone_id || near.has(o.zone_id)))
+    .filter((o) => !(o.dispatched || []).some((d) => d.unit === unit && d.status !== "cleared" && d.status !== "cancelled"))
+    .map((o) => ({ incident_id: o.id, zone_id: o.zone_id, target: o.target, rung: o.rung, independent_count: o.independent_count, where: o.zone_id === inc.zone_id ? "same district" : "next district" }))
+    .sort((a, b) => (a.where === b.where ? 0 : a.where === "same district" ? -1 : 1) || b.independent_count - a.independent_count)
+    .slice(0, 3);
+}
+
+// send the same unit on to another incident as a stop; it gets its own status line there
+export function addStop(store, inc, n, target, by) {
+  const u = (inc.dispatched || [])[n];
+  if (!u) return { ok: false, status: 404, error: "no such unit on this incident" };
+  if (!target || target.closed_at) return { ok: false, status: 404, error: "that incident is not open" };
+  if (target.rung === "hand") return { ok: false, status: 409, error: "a call that needs a person gets its own unit" };
+  if (!(CAN_COVER[u.unit] || []).includes(target.target)) return { ok: false, status: 409, error: `${u.unit} does not cover ${target.target}` };
+  const at = now();
+  const stop = initUnit({ unit: u.unit, at, by, note: `stop added from ${inc.zone_id}`, shared_from: { incident_id: inc.id, n } });
+  target.dispatched = [...(target.dispatched || []), stop];
+  u.stops = [...(u.stops || []), { incident_id: target.id, n: target.dispatched.length - 1 }];
+  store.appendEvent({ event_type: "unit_stop_added", incident_id: target.id, actor: by, provenance: "firsthand", payload_json: { unit: u.unit, from_incident_id: inc.id, zone_id: target.zone_id, target: target.target } });
+  store.save();
+  return { ok: true, unit: stop };
+}
+
 // every unit on an open incident, with how long it has been in its status and whether the watchdog has fired
-export function unitBoard(store, at = Date.now()) {
+export function unitBoard(store, at = Date.now(), adjacency = {}) {
   const out = [];
   for (const inc of store.incidents) {
     if (inc.closed_at) continue;
@@ -45,7 +83,7 @@ export function unitBoard(store, at = Date.now()) {
       if (u.status === "cleared" || u.status === "cancelled") return;
       const secs = Math.round((at - new Date(u.status_at).getTime()) / 1000);
       const limit = WATCHDOG_S[u.status];
-      out.push({ incident_id: inc.id, zone_id: inc.zone_id, target: inc.target, rung: inc.rung, n, unit: u.unit, status: u.status, status_at: u.status_at, seconds: secs, limit_s: limit ?? null, overdue: limit != null && secs > limit, next: NEXT[u.status] });
+      out.push({ incident_id: inc.id, zone_id: inc.zone_id, target: inc.target, rung: inc.rung, n, unit: u.unit, status: u.status, status_at: u.status_at, seconds: secs, limit_s: limit ?? null, overdue: limit != null && secs > limit, next: NEXT[u.status], shared_from: u.shared_from || null, stops: u.stops || [], nearby: nearbyFor(store, adjacency, inc, u.unit) });
     });
   }
   return out.sort((a, b) => Number(b.overdue) - Number(a.overdue) || b.seconds - a.seconds);

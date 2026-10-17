@@ -1,5 +1,5 @@
 // Thin client for the EchoHawk Node server. Same origin in production (the server serves web/dist).
-import type { Packet, Call, Incident, ZoneWindow, Turn, Kit, OpenCallback, Health, Meter, EventRow, UnitRow } from "./types";
+import type { Packet, Call, Incident, ZoneWindow, Turn, Kit, OpenCallback, Health, Meter, EventRow, UnitRow, HistoryFile } from "./types";
 
 export function token(fallback: string): string {
   return new URLSearchParams(location.search).get("token") || fallback;
@@ -43,6 +43,9 @@ export const api = {
   surge: () => fetch("/demo/surge", { method: "POST" }).then((r) => r.ok),
   units: () => getJSON<{ units: UnitRow[]; watchdog_s: Record<string, number>; dispositions: Record<string, string> }>("/units"),
   unitStatus: (tok: string, incidentId: string, n: number, status: string) => post(`/incidents/${enc(incidentId)}/units/${n}/status`, tok, { status }),
+  addStop: (tok: string, incidentId: string, n: number, targetId: string) => post(`/incidents/${enc(incidentId)}/units/${n}/stop`, tok, { incident_id: targetId }),
+  relayDemo: () => fetch("/demo/relay", { method: "POST" }).then((r) => r.ok),
+  history: () => getJSON<HistoryFile>("/history/rd"),
   disposition: (tok: string, incidentId: string, disposition: string, note = "") => post<{ callback_id: string | null }>(`/incidents/${enc(incidentId)}/disposition`, tok, { disposition, note }),
 };
 

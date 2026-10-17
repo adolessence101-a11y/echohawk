@@ -1,0 +1,114 @@
+// Mentor feedback, Oct 17: one unit covers nearby calls; the app cannot set its own priority; one chirp heard by several
+// nodes counts once and narrows the area; research export carries no identifiers.
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { Store } from "../store.js";
+import { Engine } from "../engine.js";
+import { makePacket } from "../schema.js";
+import { initUnit, unitBoard, addStop } from "../units.js";
+import { triageSelfReport } from "../triage.js";
+import { scanTurn } from "../triggers.js";
+import { approxArea } from "../relay.js";
+import { researchRows, toCsv } from "../research.js";
+
+const ADJ = { Z06: ["Z07"], Z07: ["Z06"] };
+const pk = (o) => makePacket({ source: "app", severity: 2, action: "info_only", provenance: "firsthand", content_status: "extracted", ...o }).packet;
+
+function scene() {
+  const store = new Store(); const engine = new Engine(store, { adjacency: ADJ });
+  const main = engine.ingest(pk({ identifier: "a", zone_id: "Z06", target: "water" })).incident;
+  const next = engine.ingest(pk({ identifier: "b", zone_id: "Z07", target: "power" })).incident;
+  const gas = engine.ingest(pk({ identifier: "c", zone_id: "Z06", target: "person" })).incident;
+  main.dispatched = [initUnit({ unit: "utility", at: new Date().toISOString(), by: "dispatcher" })];
+  return { store, engine, main, next, gas };
+}
+
+test("a utility crew already out is offered the power call next door, not the person call", () => {
+  const { store } = scene();
+  const [u] = unitBoard(store, Date.now(), ADJ);
+  assert.deepEqual(u.nearby.map((x) => [x.zone_id, x.target, x.where]), [["Z07", "power", "next district"]]);
+});
+
+test("adding the stop puts the same crew on the second incident, and a wrong-type stop is refused", () => {
+  const { store, main, next, gas } = scene();
+  const out = addStop(store, main, 0, next, "dispatcher");
+  assert.equal(out.ok, true);
+  assert.equal(next.dispatched[0].unit, "utility");
+  assert.equal(next.dispatched[0].shared_from.incident_id, main.id);
+  assert.equal(addStop(store, main, 0, gas, "dispatcher").status, 409);
+  const rows = unitBoard(store, Date.now(), ADJ);
+  assert.equal(rows.length, 2);
+  assert.equal(rows.find((r) => r.incident_id === main.id).nearby.length, 0); // already covered
+});
+
+test("a call that needs a person never becomes a shared stop", () => {
+  const { store, engine, main } = scene();
+  const hand = engine.ingest(pk({ identifier: "d", zone_id: "Z07", target: "power" }), { triggers: { hard: ["trapped"], soft: [] } }).incident;
+  assert.equal(hand.rung, "hand");
+  assert.equal(addStop(store, main, 0, hand, "dispatcher").status, 409);
+});
+
+test("an app report marked severity 5 for a cat in a tree is held at 3", () => {
+  const p = pk({ identifier: "e", zone_id: "Z06", target: "person", severity: 5 });
+  triageSelfReport(p, scanTurn("my cat is stuck in a tree"));
+  assert.equal(p.severity, 3); assert.equal(p.reported_severity, 5); assert.match(p.triage_note, /held at 3/);
+});
+
+test("an app report with danger words keeps its severity and needs a person", () => {
+  const store = new Store(); const engine = new Engine(store, { adjacency: {} });
+  const p = pk({ identifier: "f", zone_id: "Z06", target: "person", severity: 5 });
+  const tr = scanTurn("my dad is not breathing");
+  triageSelfReport(p, tr);
+  assert.equal(p.severity, 5);
+  assert.equal(engine.ingest(p, { triggers: tr }).rung, "hand");
+});
+
+test("phone calls are not touched by self-report triage", () => {
+  const p = pk({ source: "voice", identifier: "g", zone_id: "Z06", target: "person", severity: 5 });
+  triageSelfReport(p, { hard: [] });
+  assert.equal(p.severity, 5);
+});
+
+test("the area from three hearing nodes covers all three", () => {
+  const a = approxArea(["N-0812-A", "N-0812-B", "N-0812-C"]);
+  assert.equal(a.nodes, 3); assert.equal(a.simulated, true);
+  assert.ok(a.radius_m > 120 && a.radius_m < 600, `radius ${a.radius_m}`);
+});
+
+test("one chirp relayed by three nodes is one report heard by three, over HTTP", async () => {
+  const { createHttpServer } = await import("../http.js");
+  const store = new Store(); const engine = new Engine(store, { adjacency: {} });
+  const hub = { sessions: new Map(), mode: () => "tuesday", attach() {} };
+  const server = createHttpServer({ store, engine, hub }); await new Promise((r) => server.listen(0, r));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  try {
+  const out = await (await fetch(`${base}/demo/relay`, { method: "POST" })).json();
+  assert.equal(out.results[0].heard_by.length, 1);
+  assert.equal(out.results[2].duplicate, true);
+  assert.equal(store.packets.length, 1);
+  assert.deepEqual(store.packets[0].heard_by, ["N-0812-A", "N-0812-B", "N-0812-C"]);
+  const [inc] = await (await fetch(`${base}/incidents`)).json();
+  assert.equal(inc.independent_count, 1);
+  assert.equal(inc.rung, "hand"); // "trapped"
+  assert.equal(inc.heard_by.length, 3);
+  assert.equal(inc.approx_area.nodes, 3);
+  const csv = await (await fetch(`${base}/research/export.csv`, { headers: { authorization: "Bearer dev-supervisor" } })).text();
+  assert.match(csv.split("\n")[0], /seconds_to_first_unit/);
+  assert.match(csv.split("\n")[1], /,3,/); // heard_by_nodes
+  assert.equal((await fetch(`${base}/research/export.csv`)).status, 401);
+  } finally { server.closeAllConnections?.(); server.close(); }
+});
+
+test("the research export carries no phone, device or caller identifiers", () => {
+  const { store } = scene();
+  const csv = toCsv(researchRows(store));
+  const header = csv.split("\n")[0];
+  for (const bad of ["independence_key", "identifier", "phone", "device", "call_id", "transcript"]) assert.ok(!header.includes(bad), bad);
+  for (const p of store.packets) assert.ok(!csv.includes(p.independence_key));
+});
+
+test("an app report of a fire keeps the severity the resident gave", () => {
+  const p = pk({ identifier: "h", zone_id: "Z06", target: "structure_fire", severity: 5 });
+  triageSelfReport(p, { hard: [] });
+  assert.equal(p.severity, 5);
+});

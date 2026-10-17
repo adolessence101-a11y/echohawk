@@ -157,3 +157,12 @@ svg.links line { stroke: var(--ask); stroke-width: 6; stroke-linecap: round; str
 .urow.over { background: rgba(229,72,77,.08) } .urow.over > b { background: var(--hand); color: #fff } .urow.over .lcm span { color: #ff9d9d }
 .unext { display: flex; gap: 4px } .unext button { font-size: 11.5px; padding: 3px 9px }
 .closeas { font-size: 12px; padding: 5px 8px; background: #121a26; color: var(--text); border: 1px solid var(--line2); border-radius: 7px }
+
+/* mentor feedback: relays, triage, nearby stops, history */
+.relayline { margin-top: 6px; font-size: 12.5px; color: var(--text, #d6dde4); background: rgba(229, 72, 77, 0.08); border-left: 3px solid var(--hand, #e5484d); padding: 6px 10px; border-radius: 6px; }
+.relayline.held { background: rgba(242, 180, 60, 0.08); border-left-color: var(--ask, #f2b43c); }
+.nearby { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 4px; font-size: 12px; color: var(--muted, #8b98a5); }
+.nearby button { font-size: 12px; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--teal, #3cc7b4); background: transparent; color: var(--teal, #3cc7b4); cursor: pointer; }
+.nearby button:hover { background: rgba(60, 199, 180, 0.12); }
+.histsel { margin-left: 8px; font-size: 12px; padding: 4px 8px; border-radius: 8px; background: var(--panel2, #18242f); color: inherit; border: 1px solid var(--line, #2a3542); }
+.lcm span.nearby { display: flex; white-space: normal; overflow: visible; text-overflow: clip; }
