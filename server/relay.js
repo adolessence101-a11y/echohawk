@@ -26,7 +26,7 @@ export function readFrame(b64, key) {
   const f = decodeFrame(fromBase64(b64), key, new ReplayWindow());
   if (!f.ok) return f;
   if (f.type !== "sos" && f.type !== "checkin") return { ok: false, error: `a ${f.type} frame is not a report` };
-  const zone_id = f.zone >= 1 && f.zone <= 16 ? `Z${String(f.zone).padStart(2, "0")}` : String(f.zone).padStart(4, "0");
+  const zone_id = f.zone === 0 ? "unknown" : f.zone >= 1 && f.zone <= 16 ? `Z${String(f.zone).padStart(2, "0")}` : String(f.zone).padStart(4, "0");
   return { ...f, fields: { zone_id, target: f.target, severity: f.severity || 3, action: f.action, language: f.language, content_status: f.target === "unknown" ? "partial" : "extracted", identifier: `frame:${f.type}:${zone_id}:${f.sequence}`, text: f.type === "sos" ? "sos beacon" : "" } };
 }
 export const RELAY_WINDOW_MS = 10 * 60 * 1000; // the same frame inside 10 minutes is the same message (team judgment)

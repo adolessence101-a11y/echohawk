@@ -7,7 +7,7 @@ import { DeployBar, Toasts, useToasts } from "../shared/ui";
 import { LiveCall, langName } from "../shared/LiveCall";
 import { AppHeader, Icon, SUPERVISOR_TABS } from "../shared/Brand";
 import { rdOf } from "../shared/laMap";
-import { isMachineOnly, plainReason, suggest, tName, trig } from "../shared/labels";
+import { isMachineOnly, plainReason, suggest, tName, trig, sourcesLabel, requestTitle, SOURCE } from "../shared/labels";
 import { ZoneGrid } from "./ZoneGrid";
 import { UnitPill, STATUS_LABEL, mmss } from "../shared/Units";
 import type { HistoryFile, UnitRow, UnitStatus } from "../shared/types";
@@ -35,11 +35,12 @@ function chime(level: "hand" | "ask") {
 
 // The subtitle under each report: what the people (or machines) on this line are saying, in one plain sentence.
 function reportLine(i: Incident): string {
+  if (i.intake_pending) return 'Awaiting details. Confirm what happened and the location.';
   if (isMachineOnly(i)) return `${i.machine_count} alarm activation${(i.machine_count || 0) > 1 ? "s" : ""}, no people calling yet.`;
-  if ((i.triggers || []).length) return `Caller said: ${(i.triggers || []).map(trig).join(", ")}.`;
+  if ((i.triggers || []).length) return `Priority signal: ${(i.triggers || []).map(trig).join(", ")}.`;
   const n = i.independent_count;
   if (i.spread_linked_incident_id) return `${n > 1 ? "Multiple residents" : "A resident"} reporting it, also reported next door.`;
-  return n > 1 ? `${n} separate callers reporting the same thing.` : "One report so far. Watching for more.";
+  return n > 1 ? `${n} separate sources reporting the same thing.` : "One report so far. Watching for more.";
 }
 
 type SortKey = "priority" | "district" | "report" | "sources";
@@ -224,7 +225,7 @@ export function Board() {
                   <div className="ev">{d.ev.map((e, k) => <span key={k}>{e}</span>)}</div>
                   {d.hint && <div className="hint">{d.hint}</div>}
                   <div className="acts">
-                    {d.incs.length > 0 && <DeployBar size="sm" withCallback={false} dispatched={d.incs.flatMap((i) => i.dispatched || [])} suggested={[...new Set(d.incs.flatMap((i) => suggest(undefined, i.target)))]} onSend={(u) => deploy(ids, u)} />}
+                    {d.incs.length > 0 && <DeployBar size="sm" withCallback={false} dispatched={d.incs.flatMap((i) => i.dispatched || [])} suggested={[...new Set(d.incs.flatMap((i) => i.intake_pending ? [] : suggest(undefined, i.target)))]} onSend={(u) => deploy(ids, u)} />}
                     <span className="right">
                       <button onClick={() => showOnMap(topAlert)}>Show on map</button>
                       <button onClick={() => setMinimized(true)}>Minimize</button>
@@ -248,12 +249,12 @@ export function Board() {
         <div className="stat"><span className="si">{Icon.person("#e5484d")}</span><div><span>Needs a person</span><b>{String(n.hand).padStart(2, "0")}</b></div></div>
         <div className="stat"><span className="si">{Icon.clipboard("#f2b43c")}</span><div><span>Verify</span><b>{String(n.ask).padStart(2, "0")}</b></div></div>
         <div className="stat"><span className="si">{Icon.eye("#4c9cf0")}</span><div><span>Watching</span><b>{String(n.watch).padStart(2, "0")}</b></div></div>
-        <div className="stat clickable" onClick={() => { if (liveCalls[0]) setListen(liveCalls[0].id); else document.getElementById("livecalls")?.scrollIntoView({ behavior: "smooth", block: "center" }); }} title="Listen to live calls"><span className="si">{Icon.phone("#3cc7b4")}</span><div><span>Active calls</span><b>{String(health?.calls_active ?? 0).padStart(2, "0")}</b></div></div>
+        <div className="stat clickable" onClick={() => { if (liveCalls[0]) setListen(liveCalls[0].id); else document.getElementById("livecalls")?.scrollIntoView({ behavior: "smooth", block: "center" }); }} title="Open requests include calls, app requests and device reports"><span className="si">{Icon.phone("#3cc7b4")}</span><div><span>Open requests</span><b>{String(health?.requests_open ?? 0).padStart(2, "0")}</b></div></div>
       </div>
 
       <div className="split">
         <section className="panel incpanel">
-          <div className="ptitle">Current incidents<span className="spacer" />{inc.length > 0 && <span className="muted small">{inc.reduce((a, i) => a + i.packet_ids.length, 0)} calls → {inc.length} lines</span>}</div>
+          <div className="ptitle">Current incidents<span className="spacer" />{inc.length > 0 && <span className="muted small">{inc.reduce((a, i) => a + i.packet_ids.length, 0)} requests → {inc.length} incidents</span>}</div>
           <table className="inctable">
             <thead><tr><Th k="priority">Priority</Th><Th k="district">District</Th><Th k="report">Report</Th><Th k="sources">Sources</Th><th /></tr></thead>
             <tbody>
@@ -263,8 +264,8 @@ export function Board() {
                   <Fragment key={i.id}>
                   <tr className={open ? "on" : ""} onClick={() => setSel(open ? null : i.id)} aria-expanded={open}>
                     <td><span className={`prio ${mo ? "machine" : i.rung}`}>{mo ? "ALARM" : PRIO_LABEL[i.rung]}</span></td>
-                    <td className="dist">{rdOf(i.zone_id)}</td>
-                    <td><div className="rt">{tName(i.target)}{i.spread_linked_incident_id && <span className="mini spread">spreading</span>}{flagged.has(i.zone_id) && <span className="mini flag">unusual volume</span>}{(i.dispatched || []).length > 0 && <span className="mini sent">units sent</span>}</div><div className="rs">{reportLine(i)}</div></td>
+                    <td className="dist">{i.zone_id === "unknown" ? "Not set" : rdOf(i.zone_id)}</td>
+                    <td><div className="rt">{requestTitle(i)}{i.spread_linked_incident_id && <span className="mini spread">spreading</span>}{flagged.has(i.zone_id) && <span className="mini flag">unusual volume</span>}{(i.dispatched || []).length > 0 && <span className="mini sent">units sent</span>}</div><div className="rs">{reportLine(i)}</div><div className="rs">{sourcesLabel(i.source_counts)}</div></td>
                     <td className="src">{i.independent_count}{i.machine_count ? <span className="muted small"> +{i.machine_count} alarm</span> : null}</td>
                     <td className="chev" title={open ? "Hide details" : "Show details and send help"}><span className={`chevi ${open ? "open" : ""}`}>{Icon.chevron(open ? "#3cc7b4" : "#8d9aae")}</span></td>
                   </tr>
@@ -272,14 +273,14 @@ export function Board() {
                     <tr className="exprow"><td colSpan={5}>
                       <div className="drawer">
                   <div className="dtop"><span className="muted small">First report {ago(selInc.first_report_at)} ago{selInc.zone_id !== rdOf(selInc.zone_id) ? ` · demo zone ${selInc.zone_id}` : ""}</span></div>
-                  <div className="dstats"><span><b>{selInc.packet_ids.length}</b> calls → <b>1</b> line</span><span><b>{selInc.independent_count}</b> independent</span>{!!selInc.machine_count && <span><b>{selInc.machine_count}</b> machine</span>}<span>confidence* <b>{Number(selInc.score).toFixed(2)}</b>{selInc.trend === "rising" ? " ↑" : ""}</span></div>
+                  <div className="dstats"><span><b>{selInc.packet_ids.length}</b> requests → <b>1</b> incident</span><span><b>{selInc.independent_count}</b> independent</span>{!!selInc.machine_count && <span><b>{selInc.machine_count}</b> machine</span>}<span>confidence* <b>{Number(selInc.score).toFixed(2)}</b>{selInc.trend === "rising" ? " ↑" : ""}</span></div>
                   <div className="why">{closeErr[selInc.id] || (isMachineOnly(selInc) ? "Only alarm activations so far. Likely one cause (power or wind), not separate emergencies. Confirm one address first." : plainReason(selInc.last_reason))}</div>
                   {!!selInc.heard_by?.length && <div className="relayline">📡 {selInc.picked_up ? `Picked up by ${selInc.picked_up.node} over ${CH[selInc.picked_up.channel] || selInc.picked_up.channel} at ${hms(selInc.picked_up.at)}${selInc.delivered_at ? ", receipt sent back to the sender" : ""}. ` : ""}Heard by {selInc.heard_by.length} node{selInc.heard_by.length > 1 ? "s" : ""} ({selInc.heard_by.join(", ")}), counted once.{selInc.approx_area ? ` Came from within about ${selInc.approx_area.radius_m} m of those poles (circle on the map). Simulated node positions.` : ""}</div>}
                   {!!selInc.self_reported_held && <div className="relayline held">⚖ {selInc.triage_note}. The app cannot set its own priority.</div>}
                   <div className="chips">{(selInc.triggers || []).map((t) => <span key={t} className="chip trig">heard: {trig(t)}</span>)}{acked.has(selInc.id) && <span className="chip">seen by supervisor</span>}</div>
                   {(selInc.dispatched || []).length > 0 && <div className="units">{(selInc.dispatched || []).map((d, n) => <UnitPill key={n} d={d} n={n} limit={watchdog[d.status || "assigned"]} onSet={(k, st) => setUnit(selInc.id, k, st)} />)}</div>}
                   <div className="dacts">
-                    <DeployBar withCallback={false} dispatched={selInc.dispatched} suggested={suggest(undefined, selInc.target)} onSend={(u) => deploy([selInc.id], u)} />
+                    <DeployBar withCallback={false} dispatched={selInc.dispatched} suggested={selInc.intake_pending ? [] : suggest(undefined, selInc.target)} onSend={(u) => deploy([selInc.id], u)} />
                     <span className="spacer" />
                     <button className="pubbtn" onClick={() => setCompose({ zones: [selInc.zone_id], hazard: tName(selInc.target) })}>📣 Alert residents</button>
                 {liveCallFor(selInc.id) && <button className="listenbtn" onClick={() => setListen(liveCallFor(selInc.id)!.id)}>{Icon.phone("#3cc7b4", 14)} Listen to the live call</button>}
@@ -344,7 +345,7 @@ export function Board() {
             {recentCalls.map((c) => (
               <div key={c.id} className="lcrow ended" onClick={() => setListen(c.id)}>
                 <span className="lcdot off" />
-                <div className="lcm"><b>{langName(c.language)} · {c.zone_id && c.zone_id !== "unknown" ? `District ${rdOf(c.zone_id)}` : "no zone"}</b><span>{tName(c.target)}{c.status === "transferred" ? " · handed to a dispatcher" : ""}</span></div>
+                <div className="lcm"><b>{langName(c.language)} · {c.zone_id && c.zone_id !== "unknown" ? `District ${rdOf(c.zone_id)}` : "no zone"}</b><span>{SOURCE[c.source || "voice"]} · {requestTitle(c)}{c.status === "transferred" ? " · handed to a dispatcher" : ""}</span></div>
                 <span className="lct">{hms(c.started_at).slice(0, 5)}</span>
               </div>
             ))}

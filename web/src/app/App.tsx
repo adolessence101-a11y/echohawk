@@ -81,7 +81,7 @@ export function App() {
     <div className="phone">
       <header className="ph-head">
         <Logo size={34} color="#c8333a" /><span className="ph-brand">EchoHawk</span>
-        <span className="spacer" />
+        <span className="spacer" /><a href="/app/" style={{fontSize:14, marginRight:12}}>Simple mode</a>
         <span className={`ph-net ${online ? "" : "off"}`}><i />{online ? "Online" : "Offline"}</span>
       </header>
       <main className="ph-main">

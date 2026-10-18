@@ -6,7 +6,7 @@ export const FLAGS: [string, string][] = [["wrong_zone", "Wrong zone"], ["wrong_
 // Engine reasons are written for the audit log; say the same thing in plain words on the wall.
 export function human(it: Item): string {
   const n = it.independent || 0, m = it.machine || 0, r = String(it.reason || "");
-  if (it.triggers.length) return `Caller said something that always gets a person: ${it.triggers.map(trig).join(", ")}.`;
+  if (it.triggers.length) return `Priority signal requiring human review: ${it.triggers.map(trig).join(", ")}.`;
   if (/^spread/.test(r)) return "Same problem now reported in the zone next door. It may be spreading.";
   if (!n && m) return `${m} alarm activation${m > 1 ? "s" : ""}, no people calling. Likely a power blip or wind, not ${m} separate emergencies.`;
   if (/high-consequence/.test(r)) return `${tName(it.target)} can get worse fast, so one report is enough to ask a person to check.`;
@@ -16,6 +16,7 @@ export function human(it: Item): string {
 }
 
 export function anyoneHurt(it: Item): string {
+  if (it.intake_pending) return "Not confirmed";
   if (it.triggers.some((t) => ["breathing_qualified", "unconscious", "severe_bleeding", "insists_higher_severity"].includes(t)) || it.target === "person") return "Yes";
   if (it.kind === "call" && it.last.some((t) => /\b(no one|nobody|nadie)\b/i.test(t.text))) return "No";
   return "Not said";

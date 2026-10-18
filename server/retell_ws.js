@@ -161,6 +161,8 @@ export class RetellHub {
   async ensurePacket(s, { triggers, force = false }) {
     const text = s.transcript.filter((t) => t.role === "user").map((t) => t.content).join("\n");
     s.fields = await extractFields(text);
+    const intake = this.store.packets.find(p => p.call_id === s.callId && p.request_kind === 'emergency_call');
+    if (intake) { this.engine.refine(intake, { ...s.fields, language: s.callerLang, content_status: s.fields.complete ? 'extracted' : 'partial' }, triggers); s.packetSent = true; return; }
     if (s.packetSent) return;
     if (s.fields.complete || force) {
       const { packet, errors } = makePacket({ source: "voice", zone_id: s.fields.zone_id || "unknown", target: s.fields.target, severity: s.fields.severity, action: s.fields.action, identifier: s.callId, call_id: s.callId, language: s.callerLang, content_status: s.fields.complete ? "extracted" : "partial", mode: this.mode() });

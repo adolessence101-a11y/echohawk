@@ -1,5 +1,5 @@
 import type { EventRow, Incident } from "../shared/types";
-import { RUNG_LABEL, plainReason, tName, trig, unitLabel } from "../shared/labels";
+import { RUNG_LABEL, plainReason, tName, trig, unitLabel, SOURCE, requestTitle } from "../shared/labels";
 
 export const FEED_COLOR: Record<string, string> = {
   packet_created: "var(--watch)", incident_opened: "var(--watch)", rung_changed: "var(--hand)", trigger_fired: "var(--hand)", incident_spread: "var(--ask)",
@@ -15,13 +15,14 @@ export function feedLine(ev: EventRow, byId: Record<string, Incident>): { where:
   const p = ev.payload_json || {}, i = ev.incident_id ? byId[ev.incident_id] : undefined;
   const where = String(p.zone_id || i?.zone_id || "");
   const t = p.target || i?.target;
+  const title = requestTitle({ target: t, intake_pending: p.intake_pending ?? i?.intake_pending });
   switch (ev.event_type) {
     case "report_picked_up": return { where: where || "no zone", text: `eHawk SOS picked up by ${p.node_id} over ${p.channel === "ble" ? "Bluetooth" : p.channel}, receipt sent back` };
     case "relay_heard": return { where: where || "", text: `same report also heard by ${p.node_id} (${p.channel === "ble" ? "Bluetooth" : p.channel}), counted once` };
-    case "packet_created": return { where: where || "no zone", text: p.source === "telemetry" ? "alarm activation (machine)" : p.content_status === "none" ? "call with no usable details (counted for volume only)" : `${tName(t)} · new AI call` };
-    case "incident_opened": return { where, text: `new line: ${tName(t)}` };
-    case "rung_changed": return { where, text: `${tName(t)} moved to ${RUNG_LABEL[p.to as keyof typeof RUNG_LABEL] || p.to} (${plainReason(p.reason)})` };
-    case "trigger_fired": return { where, text: `caller said: ${(p.triggers || []).map(trig).join(", ")}` };
+    case "packet_created": return { where: where || "no zone", text: p.source === "telemetry" ? "alarm activation (machine)" : p.content_status === "none" ? "call with no usable details (counted for volume only)" : `${title} · new ${(SOURCE[p.source] || "request").toLowerCase()}` };
+    case "incident_opened": return { where, text: `new incident: ${title}` };
+    case "rung_changed": return { where, text: `${title} moved to ${RUNG_LABEL[p.to as keyof typeof RUNG_LABEL] || p.to} (${plainReason(p.reason)})` };
+    case "trigger_fired": return { where, text: `priority signal: ${(p.triggers || []).map(trig).join(", ")}` };
     case "incident_spread": return { where: (p.zones || []).join(" and "), text: `${tName(p.target)} spreading across neighboring zones` };
     case "scan_flagged": return { where, text: `unusual volume: ${p.n} reports in 15 min` };
     case "units_dispatched": return { where, text: `${(p.units || []).map(unitLabel).join(", ")} sent by ${ev.actor || ""}` };

@@ -1,6 +1,6 @@
 // Alert model for the supervisor board: what pops, how it reads in plain words, and the evidence behind it.
 import type { Incident } from "../shared/types";
-import { isMachineOnly, plainReason, tName, trig } from "../shared/labels";
+import { isMachineOnly, plainReason, tName, trig, requestTitle } from "../shared/labels";
 
 export type AlertKind = "spread" | "scan" | "trigger" | "hand";
 export interface Alert {
@@ -46,12 +46,13 @@ export function describe(a: Alert, byId: Record<string, Incident>): Described {
   const t0 = incs.length ? Math.min(...incs.map((i) => +new Date(i.first_report_at))) : 0;
   const t1 = incs.length ? Math.max(...incs.map((i) => +new Date(i.last_packet_at))) : 0;
   const target = a.target || incs[0]?.target;
+  const titleName = incs[0]?.intake_pending ? requestTitle(incs[0]) : tName(target);
   const ev: string[] = [];
   let kind = "NEEDS A PERSON", title = "", hint = "", cls: Described["cls"] = "";
   if (a.kind === "spread") {
     kind = "BIGGER ISSUE";
     const order = [...incs].sort((x, y) => +new Date(x.first_report_at) - +new Date(y.first_report_at)).map((x) => x.zone_id);
-    title = `${tName(target)} spreading ${[...new Set([...order, ...a.zones])].join(" → ")}`;
+    title = `${titleName} spreading ${[...new Set([...order, ...a.zones])].join(" → ")}`;
     hint = "Same problem in neighboring zones at the same time. Treat it as one area event, not separate calls.";
   } else if (a.kind === "scan" && a.scan) {
     const s = a.scan, mo = incs.length > 0 && incs.every(isMachineOnly), z = a.zones[0];
@@ -61,17 +62,17 @@ export function describe(a: Alert, byId: Record<string, Incident>): Described {
     if (s.p_tail != null) ev.push(`chance by luck ${s.p_tail < 1e-6 ? "under 1 in a million" : "1 in " + Math.round(1 / s.p_tail).toLocaleString()}`);
     hint = mo ? "Machines, not people. Likely one cause (power or wind). Check one address before sending a truck to each alarm." : "More calls than this zone gets at this hour. Something bigger may be happening here.";
   } else if (a.kind === "trigger") {
-    title = `${tName(target)} in ${a.zones.join(", ")} · caller said: ${a.triggers.map(trig).join(", ")}`;
-    hint = "Life-safety words on an AI-handled call. A person should take this now.";
+    title = `${titleName} in ${a.zones.join(", ")} · priority signal: ${a.triggers.map(trig).join(", ")}`;
+    hint = "An emergency request or safety trigger needs human review. Confirm the situation and location.";
   } else {
-    title = `${tName(target)} in ${a.zones.join(", ")}`;
+    title = `${titleName} in ${a.zones.join(", ")}`;
     hint = incs[0]?.last_reason ? `Why: ${plainReason(incs[0].last_reason)}` : "";
   }
   const lead: string[] = [];
   if (calls) {
-    if (indep) lead.push(`${indep} independent caller${indep === 1 ? "" : "s"}`);
+    if (indep) lead.push(`${indep} independent source${indep === 1 ? "" : "s"}`);
     if (mach) lead.push(`${mach} alarm activation${mach === 1 ? "" : "s"} (machines, not counted as callers)`);
-    lead.push(`${calls} call${calls === 1 ? "" : "s"} → ${Math.max(1, incs.length)} line${incs.length > 1 ? "s" : ""}`);
+    lead.push(`${calls} request${calls === 1 ? "" : "s"} → ${Math.max(1, incs.length)} incident${incs.length > 1 ? "s" : ""}`);
   }
   // the scan alert is about one 15-minute window, so a long line-wide time span would contradict its headline
   if (t0 && t1 && calls > 1 && a.kind !== "scan" && t1 - t0 <= 30 * 60000) ev.push(`within ${mins(t1 - t0)}`);

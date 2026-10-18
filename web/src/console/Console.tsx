@@ -9,13 +9,13 @@ import { LiveCall } from "../shared/LiveCall";
 import { UnitPill } from "../shared/Units";
 import type { UnitStatus } from "../shared/types";
 import { rdOf } from "../shared/laMap";
-import { RUNG_LABEL, suggest, tName, trig, unitLabel } from "../shared/labels";
+import { RUNG_LABEL, suggest, tName, trig, unitLabel, requestTitle } from "../shared/labels";
 import { buildItems, type Item } from "./items";
 import { FLAGS, anyoneHurt, human } from "./words";
 
 const TOK = token("dev-dispatcher");
 import { langName, langNative } from "../shared/languages";
-const district = (z?: string | null) => (z ? `Zone ${rdOf(z)}` : "Zone ?");
+const district = (z?: string | null) => (z && z !== "unknown" ? `Zone ${rdOf(z)}` : "Location not set");
 
 function kitIcon(k: Kit) {
   const c = "#c2cbd8";
@@ -63,7 +63,7 @@ export function Console() {
     return [...all].sort((a, b) => g(a) - g(b) || +new Date(b.last_at || b.start) - +new Date(a.last_at || a.start));
   }, [calls, incs]);
   const callsOnly = items.filter((x) => x.kind === "call");
-  const groups: [string, Item[]][] = [["Calls", [...callsOnly].sort((a, b) => Number(b.live) - Number(a.live) || (a.lane === "need" ? 0 : 1) - (b.lane === "need" ? 0 : 1) || +new Date(b.start) - +new Date(a.start))], ["Reports from the AI line", items.filter((x) => x.kind === "report")]];
+  const groups: [string, Item[]][] = [["Calls", [...callsOnly].sort((a, b) => Number(b.live) - Number(a.live) || (a.lane === "need" ? 0 : 1) - (b.lane === "need" ? 0 : 1) || +new Date(b.start) - +new Date(a.start))], ["App, device and call reports", items.filter((x) => x.kind === "report")]];
   const ordered = groups.flatMap(([, l]) => l);
   const it = items.find((x) => x.id === selected) || ordered[0];
   const liveCount = items.filter((x) => x.live).length;
@@ -153,8 +153,8 @@ export function Console() {
                   <div key={x.id} className={`crow ${x.id === it?.id ? "on" : ""} ${x.lane === "need" ? "need" : ""}`} onClick={() => setSelected(x.id)}>
                     <span className="cic" style={{ background: x.id === it?.id && x.lane === "need" ? "#e5484d" : "transparent" }}>{Icon.phoneSolid(x.id === it?.id && x.lane === "need" ? "#fff" : rowColor(x), 20)}</span>
                     <div className="cmain">
-                      <div className="cl1">{x.kind === "call" ? langName(x.language) : "Caller report"}{x.kind === "call" && x.language && x.language !== "en" && langNative(x.language) ? <span className="native"> {langNative(x.language)}</span> : null} · {district(x.zone)}</div>
-                      <div className="cl2">{tName(x.target)}{x.triggers.length > 0 && <span className="dotred" title="life-safety words heard" />}{x.flags.length > 0 && <span className="flagmark">⚑</span>}{x.dispatched.length > 0 && <span className="sentmark">✓ sent</span>}{x.kind === "call" && x.status === "transferred" && x.live && <span className="sentmark">you have it</span>}</div>
+                      <div className="cl1">{x.demo ? "Demo · " : ""}{x.source_label}{x.kind === "call" ? " · " + langName(x.language) : ""}{x.kind === "call" && x.language && x.language !== "en" && langNative(x.language) ? <span className="native"> {langNative(x.language)}</span> : null} · {district(x.zone)}</div>
+                      <div className="cl2">{requestTitle(x)}{x.triggers.length > 0 && <span className="dotred" title="life-safety words heard" />}{x.flags.length > 0 && <span className="flagmark">⚑</span>}{x.dispatched.length > 0 && <span className="sentmark">✓ sent</span>}{x.kind === "call" && x.status === "transferred" && x.live && <span className="sentmark">you have it</span>}</div>
                     </div>
                     <span className="ctime">{x.live ? <span className="livedot">● {duration(x.start)}</span> : hms(x.last_at || x.start).slice(0, 5)}</span>
                     {Icon.chevron("#8d9aae")}
@@ -170,20 +170,20 @@ export function Console() {
           {!it ? <div className="placeholder"><b>No call selected</b>Pick a call on the left.</div> : (
             <>
               <div className="ptitle">
-                {it.kind === "call" ? "Call with resident" : "Report from the AI line"}
+                {it.demo ? "Demo call with resident" : it.kind === "call" ? "Call with resident" : it.source_label}
                 <span className="spacer" />
                 {live ? <span className="livetag"><i />Live · {duration(it.start)}</span> : <span className="muted small">{it.kind === "call" ? `ended · ${duration(it.start, it.end)}` : `first report ${hms(it.start).slice(0, 5)}`}</span>}
               </div>
               <div className="facts">
-                <div><span>District</span><b>{rdOf(it.zone || "") || "?"}</b></div>
-                <div><span>What</span><b>{tName(it.target)}</b></div>
+                <div><span>District</span><b>{it.zone && it.zone !== "unknown" ? rdOf(it.zone) : "Not set"}</b></div>
+                <div><span>What</span><b>{requestTitle(it)}</b></div>
                 <div><span>{it.kind === "call" ? "Language" : "Sources"}</span><b>{it.kind === "call" ? langName(it.language) : `${it.independent}${it.machine ? ` +${it.machine} alarm` : ""}`}</b></div>
                 <div><span>Anyone hurt</span><b className={anyoneHurt(it) === "Yes" ? "red" : ""}>{anyoneHurt(it)}</b></div>
                 <div><span>Status</span><b>{it.rung ? RUNG_LABEL[it.rung] : it.live ? "AI on the line" : "Handled"}</b></div>
               </div>
               <div className="actbar">
                 {it.kind === "call" && it.live && it.status !== "transferred" && <button className="takebtn" onClick={() => take(it)}>{Icon.phoneSolid("#fff", 14)} Take the call</button>}
-                {it.incident_id ? <DeployBar size="sm" dispatched={it.dispatched} suggested={suggest(it.action, it.target)} onSend={(u) => deploy(it, u)} /> : <span className="muted small">Deploy unlocks once the AI has the zone and what happened.</span>}
+                {it.incident_id ? <DeployBar size="sm" dispatched={it.dispatched} suggested={it.intake_pending ? [] : suggest(it.action, it.target)} onSend={(u) => deploy(it, u)} /> : <span className="muted small">Deploy unlocks once the AI has the zone and what happened.</span>}
                 <span className="spacer" />
                 <button className="ghostsm" onClick={() => push(it)}>Push to supervisor</button>
                 {it.kind === "call" && (
@@ -228,7 +228,8 @@ export function Console() {
             ))}
             {!kits.length && <div className="muted" style={{ padding: 14 }}>Loading kits…</div>}
           </div>
-          <div className="knote">Tap a kit to have the AI read it to the caller in their language. Every swap is logged as a human change.</div>
+          {it?.kind === "call" && it.live && <button className="ghostsm" style={{ margin: 12 }} onClick={async () => { const r = await api.kit(TOK, it.id, null); toasts.push(r.ok ? "Kit closed on the resident app. Call stays connected." : "Could not close the kit", !r.ok); }}>Close caller's kit</button>}
+          <div className="knote">Send instructions to the connected resident app. Pending medical kits are limited to demo calls.</div>
         </section>
       </main>
       <Toasts items={toasts.items} />

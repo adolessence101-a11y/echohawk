@@ -15,8 +15,9 @@ export class Engine {
   ingest(packet, { triggers = { hard: [], soft: [] } } = {}) {
     const s = this.store;
     packet.packet_id ||= s.nextId("pk");
+    packet.triggers = triggers;
     s.packets.push(packet);
-    s.appendEvent({ event_type: "packet_created", packet_id: packet.packet_id, call_id: packet.call_id, provenance: packet.provenance, actor: packet.source === "voice" ? "ai" : "device", payload_json: { zone_id: packet.zone_id, target: packet.target, source: packet.source, content_status: packet.content_status } });
+    s.appendEvent({ event_type: "packet_created", packet_id: packet.packet_id, call_id: packet.call_id, provenance: packet.provenance, actor: packet.source === "voice" ? "ai" : "device", payload_json: { zone_id: packet.zone_id, target: packet.target, source: packet.source, intake_pending: packet.intake_pending, content_status: packet.content_status } });
 
     this._scanLayer(packet);
 
@@ -30,14 +31,57 @@ export class Engine {
     return { incident, rung: incident.rung, reason: incident.last_reason };
   }
 
+  // Enrich one request rather than creating another packet for each voice turn.
+  refine(packet, fields, triggers = { hard: [], soft: [] }) {
+    const old = this.store.incidents.find(i => i.id === packet.incident_id);
+    packet.reported_fields = fields;
+    packet.triggers = {
+      hard: [...new Set([...(packet.triggers?.hard || []), ...(triggers.hard || [])])],
+      soft: [...new Map([...(packet.triggers?.soft || []), ...(triggers.soft || [])].map(t => [JSON.stringify(t), t])).values()],
+    };
+    const moving = old && (fields.zone_id && fields.zone_id !== 'unknown' && fields.zone_id !== old.zone_id || fields.target && fields.target !== 'unknown' && fields.target !== old.target);
+    // Once a human has acted, retain the incident location and keep new details for review.
+    const acted = old && ((old.dispatched || []).length || old.closed_at || this.store.events.some(e => e.incident_id === old.id && e.event_type === 'acknowledged_by_human'));
+    if (!(moving && acted)) {
+      if (moving) {
+        old.packet_ids = old.packet_ids.filter(id => id !== packet.packet_id);
+        delete packet.incident_id;
+        if (!old.packet_ids.length) this.store.incidents = this.store.incidents.filter(i => i.id !== old.id);
+        else this._rebuild(old);
+      }
+      const previousZone = packet.zone_id;
+      for (const key of ['zone_id', 'target', 'severity', 'action', 'content_status', 'language']) if (fields[key] !== undefined && fields[key] !== 'unknown') packet[key] = fields[key];
+      if (previousZone !== packet.zone_id) { this._scanLayer({ ...packet, zone_id: previousZone }, -1); this._scanLayer(packet); }
+      if (fields.target && fields.target !== 'unknown') packet.intake_pending = false;
+    }
+    const inc = !moving || acted ? old : null;
+    const current = inc || this._attach(packet);
+    this._rebuild(current);
+    this._spread(current, packet);
+    this.store.appendEvent({ event_type: 'packet_updated', packet_id: packet.packet_id, call_id: packet.call_id, incident_id: current.id, actor: 'ai', provenance: packet.provenance, payload_json: { source: packet.source } });
+    this.store.save(); return current;
+  }
+
+  _rebuild(inc) {
+    const packets = this.store.packets.filter(p => inc.packet_ids.includes(p.packet_id));
+    inc.keys = {};
+    for (const p of packets) if (!E.machineSources.includes(p.source)) inc.keys[p.independence_key] = (inc.keys[p.independence_key] || 0) + 1;
+    inc.independent_count = Object.keys(inc.keys).length;
+    inc.repeat_count = Object.values(inc.keys).reduce((n, count) => n + count - 1, 0);
+    inc.machine_count = packets.filter(p => E.machineSources.includes(p.source)).length;
+    inc.max_severity = Math.max(0, ...packets.map(p => p.severity));
+    inc.soft_weight = 0; inc.triggers = [];
+    this._rescore(inc, packets.at(-1), { hard: packets.flatMap(p => p.triggers?.hard || []), soft: packets.flatMap(p => p.triggers?.soft || []) });
+  }
+
   // ----- scan layer -----
-  _scanLayer(packet) {
+  _scanLayer(packet, delta = 1) {
     const s = this.store;
     const t = new Date(packet.received_at).getTime();
     const windowStart = new Date(Math.floor(t / E.scanWindowMs) * E.scanWindowMs).toISOString();
     let w = s.zoneWindows.find((x) => x.zone_id === packet.zone_id && x.window_start === windowStart);
     if (!w) { w = { zone_id: packet.zone_id, window_start: windowStart, n: 0, p_tail: null, flagged: false }; s.zoneWindows.push(w); }
-    w.n += 1;
+    w.n = Math.max(0, w.n + delta);
     const hour = new Date(windowStart).getUTCHours();
     const base = s.baselines.find((b) => b.zone_id === packet.zone_id && b.hour === hour);
     const lambda = Math.max(base?.mean_per_15min ?? 0.05, 1e-3);
@@ -51,7 +95,7 @@ export class Engine {
   _attach(packet) {
     const s = this.store;
     const now = new Date(packet.received_at).getTime();
-    let inc = s.incidents.find((i) => i.zone_id === packet.zone_id && i.target === packet.target && !i.closed_at && now - new Date(i.last_packet_at).getTime() <= E.keepAliveMs);
+    let inc = s.incidents.find((i) => i.zone_id === packet.zone_id && (packet.zone_id !== "unknown" || i.keys?.[packet.independence_key]) && i.target === packet.target && !i.closed_at && now - new Date(i.last_packet_at).getTime() <= E.keepAliveMs);
     if (!inc) {
       inc = { id: s.nextId("inc"), zone_id: packet.zone_id, target: packet.target, opened_at: packet.received_at, last_packet_at: packet.received_at, closed_at: null, rung: "watch", score: 0, independent_count: 0, packet_ids: [], keys: {}, max_severity: 0, spread_linked_incident_id: null, summary_text: null, summary_evidence_count: 0, last_reason: "opened", triggers: [], soft_weight: 0 };
       s.incidents.push(inc);
@@ -120,7 +164,8 @@ export class Engine {
     const ps = this.store.packets.filter((p) => p.incident_id === inc.id);
     const withNodes = ps.filter((p) => (p.heard_by || []).length).sort((a, b) => b.heard_by.length - a.heard_by.length)[0];
     const held = ps.filter((p) => p.reported_severity);
-    return { heard_by: withNodes?.heard_by || [], hearings: withNodes?.hearings || [], picked_up: withNodes?.picked_up || null, delivered_at: withNodes?.delivered_at || null, approx_area: withNodes?.approx_area || null, self_reported_held: held.length, triage_note: held[0]?.triage_note || null };
+    const source_counts = Object.fromEntries(['voice', 'app', 'ehawk', 'field_unit', 'telemetry'].map(source => [source, ps.filter(p => p.source === source).length]));
+    return { source_counts, intake_pending: ps.length > 0 && ps.every(p => p.intake_pending), heard_by: withNodes?.heard_by || [], hearings: withNodes?.hearings || [], picked_up: withNodes?.picked_up || null, delivered_at: withNodes?.delivered_at || null, approx_area: withNodes?.approx_area || null, self_reported_held: held.length, triage_note: held[0]?.triage_note || null };
   }
   _trend(inc) {
     const ps = this.store.packets.filter((p) => p.incident_id === inc.id).map((p) => new Date(p.received_at).getTime()).sort();

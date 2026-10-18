@@ -20,6 +20,7 @@ import { triageSelfReport } from "./triage.js";
 import { recordHearing, rememberFirst, zoneOfNode, readFrame, ackFrame, DEMO_NODES } from "./relay.js";
 import { researchRows, toCsv } from "./research.js";
 import { translate } from "./llm.js";
+import { createResidentApi } from "./resident.js";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const MIME = { ".html": "text/html; charset=utf-8", ".js": "text/javascript", ".css": "text/css", ".json": "application/json", ".csv": "text/csv", ".png": "image/png", ".svg": "image/svg+xml", ".webmanifest": "application/manifest+json" };
@@ -42,6 +43,7 @@ export function signRetellWebhook(rawBody, secret, ts = Date.now()) {
 }
 
 export function createHttpServer({ store, engine, hub }) {
+  const resident = createResidentApi({ store, engine, hub });
   const sseClients = new Set();
   const broadcasts = new Broadcasts(store, { frameKey: config.frameKey });
   const PHRASES = { evacuate: "Evacuate now. Take your bag and your people. Leave the zone.", shelter_in_place: "Shelter in place. Close windows and doors. Stay inside until the all clear.", all_clear: "All clear. You can return to normal activity.", info_only: "Information notice. Open the EchoHawk app for details." };
@@ -57,8 +59,9 @@ export function createHttpServer({ store, engine, hub }) {
     const path = url.pathname; const method = req.method;
     if (method === "OPTIONS") { res.writeHead(204, { "access-control-allow-origin": "*", "access-control-allow-headers": "*", "access-control-allow-methods": "*" }); return res.end(); }
     try {
+      if (await resident(req, res, url)) return;
       // ---- health ----
-      if (path === "/health") return json(res, 200, { ok: true, calls_active: hub.sessions.size, paid_concurrency: config.paidConcurrency, mode: hub.mode() });
+      if (path === "/health") return json(res, 200, { ok: true, calls_active: hub.sessions.size, requests_open: store.packets.filter(p => store.incidents.some(i => i.id === p.incident_id && !i.closed_at)).length + store.calls.filter(c => !c.ended_at && !store.packets.some(p => p.call_id === c.id)).length, paid_concurrency: config.paidConcurrency, mode: hub.mode() });
 
       // ---- Retell webhook ----
       if (path === "/webhooks/retell" && method === "POST") {
@@ -92,7 +95,7 @@ export function createHttpServer({ store, engine, hub }) {
         triageSelfReport(packet, triggers);
         packet.packet_id ||= store.nextId("pk");
         rememberFirst(store, hearing.key, hearing.node, packet, Date.now(), hearing.channel);
-        if (frame) { packet.frame_type = frame.type; packet.frame_sequence = frame.sequence; packet.delivered_at = new Date().toISOString(); }
+        if (frame) { packet.request_kind = frame.type === 'sos' ? 'help_request' : 'report'; packet.intake_pending = frame.type === 'sos'; packet.frame_type = frame.type; packet.frame_sequence = frame.sequence; packet.delivered_at = new Date().toISOString(); }
         const out = engine.ingest(packet, { triggers });
         if (frame && hearing.node) store.appendEvent({ event_type: "report_picked_up", packet_id: packet.packet_id, incident_id: out.incident?.id || null, actor: "device", provenance: "forwarded", payload_json: { node_id: hearing.node, channel: hearing.channel, sequence: frame.sequence, zone_id: packet.zone_id } });
         return { status: 201, body: { packet_id: packet.packet_id, incident_id: out.incident?.id || null, rung: out.rung, severity: packet.severity, triage_note: packet.triage_note || null, heard_by: packet.heard_by || [], approx_area: packet.approx_area || null, picked_up: packet.picked_up || null, ack_b64: receipt } };
@@ -171,13 +174,13 @@ export function createHttpServer({ store, engine, hub }) {
       if (path === "/callbacks/open" && method === "GET") return json(res, 200, openCallbacks(store));
 
       // ---- calls, transcripts, interpreter mode ----
-      if (path === "/calls" && method === "GET") { const active = url.searchParams.get("status") === "active"; const calls = store.calls.filter((c) => !active || (!c.ended_at && (c.status === "active" || c.status === "transferred"))).map((c) => { const pk = store.packets.find((p) => p.call_id === c.id); const inc = pk?.incident_id ? store.incidents.find((i) => i.id === pk.incident_id) : null; return { ...c, target: pk?.target, severity: pk?.severity, zone_id: pk?.zone_id, rung: inc?.rung || null, elapsed_s: Math.round((Date.now() - new Date(c.started_at)) / 1000), action: pk?.action, incident_id: inc?.id || null, incident_target: inc?.target || null, incident_zone: inc?.zone_id || null, independent_count: inc?.independent_count || 0, incident_size: inc?.packet_ids?.length || 0, triggers: inc?.triggers || [], dispatched: inc?.dispatched || [], last_turns: store.turns.filter((t) => t.call_id === c.id).slice(-2).map((t) => ({ role: t.role, text: t.text_original, tr: t.text_translated || null })) }; }); return json(res, 200, calls); }
+      if (path === "/calls" && method === "GET") { const active = url.searchParams.get("status") === "active"; const calls = store.calls.filter((c) => !active || (!c.ended_at && (c.status === "active" || c.status === "transferred"))).map((c) => { const pk = store.packets.find((p) => p.call_id === c.id); const inc = pk?.incident_id ? store.incidents.find((i) => i.id === pk.incident_id) : null; return { ...c, source: pk?.source || (c.direction === "web" ? "app" : "voice"), intake_pending: pk?.intake_pending, target: pk?.target, severity: pk?.severity, zone_id: pk?.zone_id, rung: inc?.rung || null, elapsed_s: Math.round((Date.now() - new Date(c.started_at)) / 1000), action: pk?.action, incident_id: inc?.id || null, incident_target: inc?.target || null, incident_zone: inc?.zone_id || null, independent_count: inc?.independent_count || 0, incident_size: inc?.packet_ids?.length || 0, triggers: inc?.triggers || [], dispatched: inc?.dispatched || [], last_turns: store.turns.filter((t) => t.call_id === c.id).slice(-2).map((t) => ({ role: t.role, text: t.text_original, tr: t.text_translated || null })) }; }); return json(res, 200, calls); }
       if (path.match(/^\/calls\/[^/]+\/transcript$/) && method === "GET") { const id = path.split("/")[2]; return json(res, 200, store.turns.filter((t) => t.call_id === id)); }
       if (path.match(/^\/calls\/[^/]+\/takeover$/) && method === "POST") { const id = path.split("/")[2]; if (role(req) === "anon") return json(res, 401, { error: "token" }); const out = await hub.takeover(id, "console"); return json(res, out.ok ? 200 : out.status, out); }
       if (path.match(/^\/calls\/[^/]+\/join$/) && method === "POST") { const id = path.split("/")[2]; if (role(req) === "anon") return json(res, 401, { error: "token" }); const body = JSON.parse((await readBody(req)).toString() || "{}"); const out = hub.join(id, body.dispatcher_id || "dispatcher"); return json(res, out.ok ? 200 : out.status, out); }
       if (path.match(/^\/calls\/[^/]+\/say$/) && method === "POST") { const id = path.split("/")[2]; if (role(req) === "anon") return json(res, 401, { error: "token" }); const body = JSON.parse((await readBody(req)).toString() || "{}"); const out = await hub.say(id, body.text || "", body.lang_from || "en"); return json(res, out.ok ? 200 : out.status, out); }
       if (path.match(/^\/calls\/[^/]+\/language$/) && method === "POST") { const id = path.split("/")[2]; const body = JSON.parse((await readBody(req)).toString() || "{}"); hub.setLanguage(id, body.lang); return json(res, 200, { ok: true }); }
-      if (path.match(/^\/calls\/[^/]+\/kit$/) && method === "POST") { const id = path.split("/")[2]; if (role(req) === "anon") return json(res, 401, { error: "token" }); const body = JSON.parse((await readBody(req)).toString() || "{}"); if (!body.kit_id) { store.appendEvent({ event_type: "kit_changed_by_human", call_id: id, actor: "dispatcher", provenance: "firsthand", payload_json: { kit_id: null, action: "closed" } }); return json(res, 200, { ok: true, closed: true }); } const out = showKitCard({ kit_id: body.kit_id, call_id: id }, store, "dispatcher"); if (out.ok) store.appendEvent({ event_type: "kit_changed_by_human", call_id: id, actor: "dispatcher", provenance: "firsthand", payload_json: { kit_id: body.kit_id } }); return json(res, out.ok ? 200 : out.status, out); }
+      if (path.match(/^\/calls\/[^/]+\/kit$/) && method === "POST") { const id = path.split("/")[2]; if (role(req) === "anon") return json(res, 401, { error: "token" }); const body = JSON.parse((await readBody(req)).toString() || "{}"); if (!body.kit_id) { for (const shown of store.kitShows) if (shown.call_id === id && !shown.closed_at) shown.closed_at = new Date().toISOString(); store.save(); store.appendEvent({ event_type: "kit_changed_by_human", call_id: id, actor: "dispatcher", provenance: "firsthand", payload_json: { kit_id: null, action: "closed" } }); return json(res, 200, { ok: true, closed: true }); } const out = showKitCard({ kit_id: body.kit_id, call_id: id }, store, "dispatcher"); if (out.ok) store.appendEvent({ event_type: "kit_changed_by_human", call_id: id, actor: "dispatcher", provenance: "firsthand", payload_json: { kit_id: body.kit_id } }); return json(res, out.ok ? 200 : out.status, out); }
       if (path === "/events/stream" && method === "GET") { res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache", connection: "keep-alive", "access-control-allow-origin": "*" }); res.write(`event: hello\ndata: {}\n\n`); sseClients.add(res); req.on("close", () => sseClients.delete(res)); return; }
       if (path === "/events" && method === "GET") return json(res, 200, store.events.slice(-500));
 
@@ -225,9 +228,11 @@ export function createHttpServer({ store, engine, hub }) {
       if (path === "/replay/run" && method === "GET") { const out = runReplay(url.searchParams.get("date") || "2025-01-07", { fromHour: Number(url.searchParams.get("from") ?? 0), toHour: Number(url.searchParams.get("to") ?? 24) }); return json(res, out.error ? 404 : 200, out); }
 
       // ---- static UIs ----
+      if (path === '/app') { res.writeHead(302, { location: '/app/' }); return res.end(); }
+      if (path === '/app/precache.json') { const data = await readFile(join(root, 'web/dist/resident-precache.json')); res.writeHead(200, { 'content-type': 'application/json' }); return res.end(data); }
       // React screens (web/dist, built by `npm run build:web`) take over when present; the plain pages stay at /legacy/*.
       const built = (name) => existsSync(join(root, `web/dist/${name}/index.html`)) ? `/web/dist/${name}/index.html` : `/${name}/index.html`;
-      const map = { "/": built("board"), "/board": built("board"), "/console": built("console"), "/replay": built("replay"), "/alerts": built("alerts"), "/node": built("node"), "/app": built("app"), "/app/": built("app"), "/app/index.html": built("app"), "/app/legacy": "/app/index.html", "/chirp": "/device/chirp_send.html",
+      const map = { "/": built("board"), "/board": built("board"), "/console": built("console"), "/replay": built("replay"), "/alerts": built("alerts"), "/node": built("node"), "/app": built("app"), "/app/": built("app"), "/app/index.html": built("app"), "/app/legacy": "/app/index.html", "/legacy/app": "/app/index.html", "/app/standard": built("standard"), "/chirp": "/device/chirp_send.html",
         "/legacy/board": "/board/index.html", "/legacy/console": "/console/index.html", "/legacy/replay": "/replay/index.html" };
       let file = map[path] || (path.startsWith("/assets/") ? "/web/dist" + path : path);
       const full = join(root, file);

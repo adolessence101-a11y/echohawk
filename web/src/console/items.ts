@@ -1,8 +1,12 @@
 // Turn calls and incidents into one list of cards, each in a lane.
+import { SOURCE, sourcesLabel } from "../shared/labels";
 import type { Call, Dispatched, Incident, Rung } from "../shared/types";
 
 export type Lane = "need" | "ai" | "done";
 export interface Item {
+  demo?: boolean;
+  source_label: string;
+  intake_pending?: boolean;
   kind: "call" | "report";
   id: string;
   lane: Lane;
@@ -44,7 +48,7 @@ export function buildItems(calls: Call[], incs: Incident[]): Item[] {
     else if (live) lane = c.rung === "hand" || hard ? "need" : "ai";
     else lane = (hard || c.status === "transferred") && !sent ? "need" : "done";
     items.push({
-      kind: "call", id: c.id, lane, live, rung: lane === "done" ? null : c.rung || null, zone: c.zone_id && c.zone_id !== "unknown" ? c.zone_id : null,
+      kind: "call", source_label: SOURCE[c.source || "voice"] || c.source!, intake_pending: c.intake_pending, demo: c.resident_demo, id: c.id, lane, live, rung: lane === "done" ? null : c.rung || null, zone: c.zone_id && c.zone_id !== "unknown" ? c.zone_id : null,
       target: c.target, severity: c.severity, language: c.language, start: c.started_at, end: c.ended_at, action: c.action, incident_id: c.incident_id,
       independent: c.independent_count, size: c.incident_size, triggers: c.triggers || [], dispatched: c.dispatched || [], flags, status: c.status, last: c.last_turns || [],
     });
@@ -56,7 +60,7 @@ export function buildItems(calls: Call[], incs: Incident[]): Item[] {
     const sent = (x.dispatched || []).length > 0;
     const lane: Lane = sent ? "done" : x.rung === "watch" && !(x.triggers || []).length ? "done" : "need";
     items.push({
-      kind: "report", id: x.id, lane, live: false, rung: x.rung, zone: x.zone_id, target: x.target, start: x.first_report_at || x.opened_at || "", last_at: x.last_packet_at,
+      kind: "report", source_label: sourcesLabel(x.source_counts) || "Report", intake_pending: x.intake_pending, id: x.id, lane, live: false, rung: x.rung, zone: x.zone_id, target: x.target, start: x.first_report_at || x.opened_at || "", last_at: x.last_packet_at,
       incident_id: x.id, independent: x.independent_count, machine: x.machine_count || 0, size: (x.packet_ids || []).length, triggers: x.triggers || [], dispatched: x.dispatched || [],
       flags: [], reason: x.last_reason, score: x.score, trend: x.trend, spread: x.spread_linked_incident_id, last: [],
     });

@@ -17,7 +17,7 @@ Spec: `docs/BUILD_SPEC.md`. Build plan, acceptance tests and lanes: `docs/IMPLEM
 ```bash
 npm install            # server dependency (ws); retell-sdk is optional and only needed for provisioning
 cp .env.example .env   # RETELL_API_KEY for provisioning, ANTHROPIC_API_KEY for Claude; the demo runs with no keys
-npm test               # 97 tests, about two seconds
+npm test               # server and integration tests
 npm start              # http://localhost:8787
 npm run build:web      # only after changing web/src: rebuilds the React screens into web/dist (a built copy is committed)
 ```
@@ -125,3 +125,58 @@ data/     LAPD baselines and replay days
 language detection (one sentence in each of the 15 languages), public alert rules (two-person approval, supervisor limits,
 all clear, signed frames, "I need help" escalation) and post-dispatch tests (unit status order, watchdog, unable to locate
 schedules a callback, reporter sees "a unit is on the way") and the mentor tests (nearby stops, self-report triage, node relays, research export without identifiers).
+
+## Connected resident app and iPhone pilot
+
+The new `/app/` follows the approved four-tile resident layout. `/app/standard` keeps the existing full React app with language, chirp and check-in tools; `/legacy/app` keeps the original HTML interface. The simple screen also receives the same public agency alerts automatically while open, with cached alerts labeled when updates cannot be checked. Build with `npm --prefix web ci` and `npm --prefix web run build`, then start the server normally.
+
+A **demo call** creates a real shared dashboard call session with a simulated text conversation. Open `/console` alongside `/app/`, start Emergency Help, choose “Try the bleeding kit”, then take that call in the console. Dispatcher messages, kit replacement, kit close and call end synchronize with the resident. The resident's own Close kit only hides it locally; Reopen instructions restores it. Demo calls are explicitly labeled. They do not contact emergency services or use Retell credits.
+
+Live browser audio is wired through Retell's Web SDK and a server-only create-web-call endpoint. It is off until all four values are configured: `RESIDENT_LIVE_ENABLED=true`, `RETELL_AGENT_ID`, `RETELL_API_KEY`, and `RESIDENT_ACCESS_CODE`. The agent must use this server's custom-LLM websocket and its reachable HTTPS public URL. Enter the pilot code in app Settings; it stays in memory. Resident read access uses a random per-call capability, never a staff token. Live audio needs a real microphone/device test. Existing console takeover uses dispatcher text or speech-to-text relayed through the agent voice, not a verified direct human-audio conference. No 911 routing is configured by this change.
+
+The severe-bleeding photo and screen are **prototype content pending qualified medical review**. Pending medical kits cannot be deployed to live resident calls. The existing catalog remains unchanged. The photo was produced with the built-in image-generation tool from the approved mockup, using the prompt: “Extract/recreate only the central first-aid demonstration photograph; preserve stacked hands applying pressure through gauze on a supported forearm, no phone or text, non-graphic.” Asset: `app/media/bleeding-pressure-prototype.png`.
+
+### iPhone first
+
+The Capacitor iOS project is in `web/ios/App/App.xcodeproj`. Its resident UI, kit catalog and illustration are bundled on-device so the shell does not depend on a live website.
+
+```sh
+npm --prefix web ci
+cd web
+npm run sync:ios
+npx cap open ios
+```
+
+In Xcode, choose your signing team and iPhone, then run. Full Xcode is required; command-line tools alone cannot compile or install the iOS app. Set the dashboard's HTTPS base URL in app Settings. Bluetooth and microphone usage descriptions are present. The privacy manifest records Preferences/UserDefaults usage; App Store privacy disclosures must reflect the eventual deployment. The current code uses the same Capacitor Bluetooth interface on iOS and Android; an Android project has not yet been generated or tested.
+
+### Offline Bluetooth → radio → gateway → dashboard
+
+Beacon and reports are saved before transmission. The three states are saved on this phone, received by a node, and received by the dashboard. A GATT write is never counted as delivery, and a receipt does not mean responders were dispatched. The backend applies the existing self-report triage; a beacon requests human attention. Voice calls, images and long text do not fit the small radio path.
+
+The iPhone uses `@capacitor-community/bluetooth-le` (Core Bluetooth) as a central connecting to a receiver peripheral. Two configurable profiles are present:
+
+- **EchoHawk demo frame (default):** matches the existing signed 16-byte format in `device/frame.js` and `web/src/app/frame.ts`. Nordic UART service `6e400001-b5a3-f393-e0a9-e50e24dcca9e`, writes `6e400002-…`, receipts notify `6e400003-…`. The report keeps one sequence across retries. Signed stage 1 means node picked up; stage 2/3 means dashboard received. The demo uses the existing shared development key, a 16-bit random sequence and the server's 10-minute deduplication window; it is not production authentication. These queued frames expire after ten minutes. Internet and radio arrivals share a packet within that window. Message text is sent over HTTPS only; radio carries category, zone and request type. The existing personal ESP32 **tag is a sender**, not the town receiver this app connects to. A receiver peripheral plus its radio driver still need implementation/testing on the selected hardware.
+- **Custom JSON adapter:** UTF-8 JSON plus newline in sequential 20-byte writes, specified by `app/relay-protocol.js`. It preserves a random `message_id`, device pseudonym, type, zone, category, severity, action, short text, creation and expiry time. The node must persist the message before notifying `{ "version": 1, "state": "node_received", "message_id": "<same-id>" }`. Only node receipts are accepted over this profile; dashboard receipt comes over HTTPS. JSON messages expire within 24 hours. Firmware must implement reassembly, radio fragmentation, routing, authentication and return receipts. This is not a Meshtastic implementation.
+
+The JSON gateway submits `{gateway_id, envelope}` to `POST /relay/ingest` with a gateway-only bearer token from `RELAY_GATEWAY_TOKEN`. `device/relay/gateway.js` durably spools reassembled envelopes from stdin, retries through outages and writes receipts to stdout for a radio driver. The compact frame path continues to use the existing `/device/packets` endpoint and signed acknowledgment. Neither path implements a radio driver. A gateway can reach a local dashboard over the LAN without internet; the nodes, gateway and dashboard need backup power.
+
+Example gateway launch (supply the same secret to server and gateway through their environment, not source):
+
+```sh
+ECHOHAWK_GATEWAY_URL=http://127.0.0.1:8787 RELAY_GATEWAY_ID=town-gateway node device/relay/gateway.js
+```
+
+Saved queues are retried while the app is active. `bluetooth-central` is declared for iOS, but background execution, state restoration, automatic reconnect, locked-screen alert reception and push notifications have **not** been implemented/validated as an always-on service. A native background service and physical-device tests are required before promising background reception. The web preview detects Bluetooth support and explains when the installed iPhone app is needed.
+
+Validation: server tests cover call ownership, dispatcher takeover, AI silence in demo mode, scoped kit delivery/close, live-kit review gates, gateway authentication, duplicate delivery, BLE chunk round trips, and gateway persistence across outages/restarts. Browser checks cover call → kit → close → reopen → dispatcher message. Physical radio range, battery behavior, iOS build/signing and live Retell audio remain device/integration checks.
+
+
+### Emergency request routing and the online demo
+
+The resident Emergency Help button saves a request before starting audio. It immediately enters the shared dispatcher/supervisor queue, even before the caller describes the problem. Speech enriches that request rather than adding another report. The board counts open requests from phone calls, the app and devices; each row identifies its source. Unknown locations remain explicit and are not grouped with unrelated unknown locations.
+
+Delivery order is HTTPS, then a connected Bluetooth receiver, then the audible signed frame when sound fallback has been enabled. All three paths reuse the saved request/frame, so retries and several hearing nodes count once. A Bluetooth write or playing a sound does not prove delivery: the app distinguishes saved, node pickup and dashboard confirmation. Signed frames expire after ten minutes; expired requests require a new user request. Internet reports without a radio frame expire after 24 hours.
+
+For a sound demo, open `/node` on a second device and choose **Listen for phone chirps**. In the resident Beacon screen, enable **Sound fallback** and allow the microphone. With phone internet unavailable, the demo sends its frame by sound when Bluetooth cannot deliver it. Keep both screens active. The laptop node still needs internet to forward to the dashboard; the radio hop is a demo stand-in. The durable JSON radio gateway adapter is in `device/relay/`. Town receiver firmware, battery-backed nodes/radio gateway, real hardware testing, production keys and reliable background behavior remain integration work. A web page cannot promise always-on iPhone Bluetooth or sound reception.
+
+For the online demonstration, host the Node server and built web UI together under one HTTPS origin: `/app/`, `/console` and `/board`. Use that origin as the dashboard address in the installed iPhone build. Separate local ports are separate servers and will not share requests. Hosting must support a long-running Node process, inbound WebSockets (Retell), SSE, HTTPS and persistent storage for `data/db.json` on a single instance. Public demo access/authentication and provider secrets must be configured before publishing; the checked-in development tokens are not production credentials. A custom domain can stay at GoDaddy and point to whichever compatible host is selected. Nothing in this change publishes the application or enables paid live calls.
