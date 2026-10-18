@@ -12,3 +12,15 @@ data/relay-outbox.json.tmp
 
 # device secrets (frame key, Wi-Fi password)
 firmware/**/secrets.h
+# Python
+.venv/
+__pycache__/
+
+# Audio captured by the test dashboard
+recordings/
+
+# Wi-Fi credentials, if you move them into their own file
+relay_node/secrets.h
+
+# macOS
+.DS_Store
